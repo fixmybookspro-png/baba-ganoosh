@@ -151,3 +151,87 @@
     color: var(--color-foreground);
   }
 }
+
+/* ── ORACLE HUD theme: graphite console, acid-lime signal ───────────────── */
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.16 0.015 250);
+  --foreground: oklch(0.95 0.01 240);
+  --surface: oklch(0.21 0.018 250);
+  --surface-2: oklch(0.26 0.02 250);
+  --card: oklch(0.21 0.018 250);
+  --card-foreground: oklch(0.95 0.01 240);
+  --popover: oklch(0.21 0.018 250);
+  --popover-foreground: oklch(0.95 0.01 240);
+  --primary: oklch(0.86 0.22 130);
+  --primary-foreground: oklch(0.18 0.03 140);
+  --secondary: oklch(0.26 0.02 250);
+  --secondary-foreground: oklch(0.95 0.01 240);
+  --muted: oklch(0.26 0.02 250);
+  --muted-foreground: oklch(0.68 0.02 250);
+  --accent: oklch(0.8 0.16 75);
+  --accent-foreground: oklch(0.18 0.03 60);
+  --destructive: oklch(0.62 0.22 22);
+  --destructive-foreground: oklch(0.97 0.01 60);
+  --signal: oklch(0.86 0.22 130);
+  --signal-foreground: oklch(0.18 0.03 140);
+  --warn: oklch(0.82 0.17 78);
+  --danger: oklch(0.65 0.23 22);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.86 0.22 130 / 60%);
+  --sidebar: oklch(0.19 0.018 250);
+  --sidebar-foreground: oklch(0.95 0.01 240);
+  --sidebar-primary: oklch(0.86 0.22 130);
+  --sidebar-primary-foreground: oklch(0.18 0.03 140);
+  --sidebar-accent: oklch(0.26 0.02 250);
+  --sidebar-accent-foreground: oklch(0.95 0.01 240);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.86 0.22 130 / 60%);
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background-image:
+      radial-gradient(1200px 600px at 15% -10%, oklch(0.86 0.22 130 / 9%), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, oklch(0.8 0.16 75 / 7%), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+}
+
+@utility hud-panel {
+  background: color-mix(in oklab, var(--surface) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(8px);
+}
+
+@utility hud-label {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+@utility glow-signal {
+  box-shadow: 0 0 0 1px oklch(0.86 0.22 130 / 35%), 0 0 32px oklch(0.86 0.22 130 / 18%);
+}
+
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@utility live-dot {
+  animation: pulse-live 1.4s ease-in-out infinite;
+}
