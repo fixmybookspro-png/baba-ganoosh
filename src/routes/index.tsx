@@ -402,38 +402,39 @@ function Oracle() {
           )}
 
 
-            <div className="hud-panel overflow-hidden">
-              <div className="relative aspect-video bg-black/60">
-                <video
-                  ref={videoRef}
-                  muted
-                  playsInline
-                  className="size-full object-contain"
-                  aria-label="Live gameplay being analysed"
-                />
-                {!watching && (
-                  <div className="absolute inset-0 grid place-items-center px-6 text-center">
-                    <div>
-                      <Gauge className="mx-auto size-8 text-muted-foreground" />
-                      <p className="mt-3 text-sm text-muted-foreground">
-                        Share your game window. ORACLE reads the frame as fast as ~1s when the
-                        action is hot, backs off when it's calm, and tunes its calls to how good you
-                        already are.
-                      </p>
-                    </div>
+          <div className={cn("hud-panel overflow-hidden", focus && "hidden")}>
+            <div className="relative aspect-video bg-black/60">
+              <video
+                ref={videoRef}
+                muted
+                playsInline
+                className="size-full object-contain"
+                aria-label="Live gameplay being analysed"
+              />
+              {!watching && (
+                <div className="absolute inset-0 grid place-items-center px-6 text-center">
+                  <div>
+                    <Gauge className="mx-auto size-8 text-muted-foreground" />
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      Share your game window. ORACLE reads the frame as fast as ~1s when the action
+                      is hot, backs off when it's calm, and tunes its calls to how good you already
+                      are.
+                    </p>
                   </div>
-                )}
-                {thinking && (
-                  <span className="hud-label absolute bottom-3 right-3 rounded bg-background/70 px-2 py-1">
-                    reading frame…
-                  </span>
-                )}
-              </div>
+                </div>
+              )}
+              {thinking && (
+                <span className="hud-label absolute bottom-3 right-3 rounded bg-background/70 px-2 py-1">
+                  reading frame…
+                </span>
+              )}
             </div>
-          </section>
+          </div>
+        </section>
 
-          {/* ── Everything else: one tab at a time, never competing ───── */}
-          <section className="space-y-4">
+        {/* ── Everything else: one tab at a time, never competing ───── */}
+        <section className={cn("space-y-4", focus && "hidden")}>
+
             <Tabs defaultValue="talk">
               <TabsList className="w-full">
                 <TabsTrigger value="talk" className="flex-1 text-xs">
