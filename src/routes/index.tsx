@@ -386,21 +386,21 @@ function Oracle() {
         </p>
       )}
 
-      {/* Play mode: only the call and the mic-line, sized to sit beside a running game. */}
-      {focus ? (
-        <div className="mt-5 space-y-3">
+      {/* Play mode collapses to just the call + ask line, sized to sit beside a running game.
+          The video element stays mounted either way so capture never restarts. */}
+      <div className={cn("mt-6 grid gap-4", !focus && "lg:grid-cols-[1.25fr_1fr]")}>
+        {/* ── The call: biggest thing on screen ─────────────────────── */}
+        <section className="space-y-3">
           {callCard}
-          {askForm}
-          <p className="hud-label text-center">
-            play mode — {tick === 0 ? `auto ${PACE_TICK[paceRef.current] / 1000}s` : `${tick / 1000}s`} reads ·{" "}
-            {update?.skill_read ?? (skill === "auto" ? "reading your level" : skill)}
-          </p>
-        </div>
-      ) : (
-        <div className="mt-6 grid gap-4 lg:grid-cols-[1.25fr_1fr]">
-          {/* ── The call: biggest thing on screen ─────────────────────── */}
-          <section className="space-y-4">
-            {callCard}
+          {focus && askForm}
+          {focus && (
+            <p className="hud-label text-center">
+              play mode —{" "}
+              {tick === 0 ? `auto ${PACE_TICK[paceRef.current] / 1000}s` : `${tick / 1000}s`} reads ·{" "}
+              {update?.skill_read ?? (skill === "auto" ? "reading your level" : skill)}
+            </p>
+          )}
+
 
             <div className="hud-panel overflow-hidden">
               <div className="relative aspect-video bg-black/60">
