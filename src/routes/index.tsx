@@ -628,15 +628,11 @@ function Oracle() {
                 </div>
               </TabsContent>
             </Tabs>
-          </section>
-        </div>
-      )}
+        </section>
+      </div>
 
       <canvas ref={canvasRef} className="hidden" />
-      {/* Video element must stay mounted in play mode so capture keeps working. */}
-      {focus && (
-        <video ref={videoRef} muted playsInline className="hidden" aria-hidden="true" />
-      )}
+
     </main>
   );
 }
