@@ -85,6 +85,10 @@ export const Route = createFileRoute("/api/coach")({
         const context = [
           `PLAYER OBJECTIVE: ${body.objective?.trim() || "Win the game as efficiently as possible."}`,
           body.gameHint?.trim() ? `GAME HINT FROM PLAYER: ${body.gameHint.trim()}` : "",
+          body.skill && body.skill !== "auto"
+            ? `PLAYER SKILL LEVEL (locked by them): ${body.skill}. Never say anything below this level.`
+            : "PLAYER SKILL LEVEL: unknown — infer it from their play and memory, and calibrate every call to it.",
+
           memory.length ? `SESSION MEMORY:\n- ${memory.join("\n- ")}` : "SESSION MEMORY: (empty)",
           history.length
             ? `RECENT DIALOGUE:\n${history.map((h) => `${h.role === "user" ? "PLAYER" : "ORACLE"}: ${h.text}`).join("\n")}`
