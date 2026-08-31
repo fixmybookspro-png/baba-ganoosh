@@ -9,6 +9,14 @@ type CoachRequest = {
   gameHint?: string;
   skill?: string;
   dossier?: string | null;
+  profile?: {
+    platform?: string;
+    progress?: string;
+    build?: string;
+    style?: string;
+    goals?: string;
+    avoid?: string;
+  } | null;
 };
 
 const SCHEMA = {
@@ -87,8 +95,21 @@ export const Route = createFileRoute("/api/coach")({
         const memory = (body.memory ?? []).slice(-40);
         const history = (body.history ?? []).slice(-6);
 
+        const p = body.profile ?? {};
+        const profileLines = [
+          p.platform?.trim() ? `Platform/controls: ${p.platform.trim()}` : "",
+          p.progress?.trim() ? `Progress when they joined: ${p.progress.trim()}` : "",
+          p.build?.trim() ? `Build/loadout: ${p.build.trim()}` : "",
+          p.style?.trim() ? `Playstyle: ${p.style.trim()}` : "",
+          p.goals?.trim() ? `Goals: ${p.goals.trim()}` : "",
+          p.avoid?.trim() ? `NEVER mention: ${p.avoid.trim()}` : "",
+        ].filter(Boolean);
+
         const context = [
           `PLAYER OBJECTIVE: ${body.objective?.trim() || "Win the game as efficiently as possible."}`,
+          profileLines.length
+            ? `PLAYER CARD (they started mid-game; treat as ground truth, never re-ask it):\n- ${profileLines.join("\n- ")}`
+            : "",
           body.gameHint?.trim() ? `GAME HINT FROM PLAYER: ${body.gameHint.trim()}` : "",
           body.skill && body.skill !== "auto"
             ? `PLAYER SKILL LEVEL (locked by them): ${body.skill}. Never say anything below this level.`
