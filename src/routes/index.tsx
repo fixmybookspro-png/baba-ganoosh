@@ -489,11 +489,15 @@ function Oracle() {
               {!watching && (
                 <div className="absolute inset-0 grid place-items-center px-6 text-center">
                   <div>
-                    <Gauge className="mx-auto size-8 text-muted-foreground" />
+                    {source === "camera" ? (
+                      <Camera className="mx-auto size-8 text-muted-foreground" />
+                    ) : (
+                      <Gauge className="mx-auto size-8 text-muted-foreground" />
+                    )}
                     <p className="mt-3 text-sm text-muted-foreground">
-                      Share your game window. ORACLE reads the frame as fast as ~1s when the action
-                      is hot, backs off when it's calm, and tunes its calls to how good you already
-                      are.
+                      {source === "camera"
+                        ? "Prop your phone up and point the rear camera at your TV — fill the frame with the screen and avoid glare. Works for Xbox, PlayStation or Switch."
+                        : "Share your game window. ORACLE reads the frame as fast as ~1s when the action is hot, backs off when it's calm, and tunes its calls to how good you already are."}
                     </p>
                   </div>
                 </div>
