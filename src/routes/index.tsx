@@ -833,10 +833,10 @@ function Oracle() {
                       className="mt-2 font-mono text-sm"
                     />
                     <p className="mt-3 text-sm text-muted-foreground">
-                      {update?.skill_read ??
-
-                        "Steer it any time — farm loot, speedrun, no-hit, chaos."}
+                      Steer it any time — farm loot, speedrun, no-hit, chaos. Naming the game loads
+                      its deep knowledge brief instantly.
                     </p>
+
                   </div>
 
                   <div className="hud-panel p-4">
