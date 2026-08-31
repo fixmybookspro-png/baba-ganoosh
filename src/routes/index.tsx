@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Brain,
+  Camera,
   Crosshair,
   Eye,
   Gauge,
@@ -13,6 +14,7 @@ import {
   Sliders,
   Sparkles,
   Square,
+  SwitchCamera,
   Target,
   Zap,
 } from "lucide-react";
