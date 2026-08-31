@@ -228,25 +228,57 @@ function Oracle() {
     };
   }, [watching, tick, consult]);
 
-  const start = async () => {
+  const attach = async (stream: MediaStream) => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = stream;
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play().catch(() => undefined);
+    }
+    stream.getVideoTracks()[0]?.addEventListener("ended", () => stop());
+    setWatching(true);
+  };
+
+  const start = async (
+    mode: "screen" | "camera" = source,
+    face: "environment" | "user" = facing,
+  ) => {
     setError(null);
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: 15 },
-        audio: false,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => undefined);
-      }
-      stream.getVideoTracks()[0]?.addEventListener("ended", () => stop());
-      setWatching(true);
+      const stream =
+        mode === "camera"
+          ? await navigator.mediaDevices.getUserMedia({
+              video: {
+                facingMode: { ideal: face },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
+                frameRate: { ideal: 15 },
+              },
+              audio: false,
+            })
+          : await navigator.mediaDevices.getDisplayMedia({
+              video: { frameRate: 15 },
+              audio: false,
+            });
+      await attach(stream);
     } catch {
       setError(
-        "Screen sharing was blocked or isn't available on this device. Use a desktop browser and pick your game window.",
+        mode === "camera"
+          ? "Camera access was blocked. Allow camera permission, then point the rear camera at your TV so the screen fills the frame."
+          : "Screen sharing was blocked or isn't available on this device. On a phone, switch to Camera and point it at your TV.",
       );
     }
+  };
+
+  const pickSource = (mode: "screen" | "camera") => {
+    setSource(mode);
+    if (watching) void start(mode, facing);
+  };
+
+  const flipCamera = () => {
+    const next = facing === "environment" ? "user" : "environment";
+    setFacing(next);
+    if (watching && source === "camera") void start("camera", next);
   };
 
   const stop = () => {
