@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Brain,
+  Camera,
   Crosshair,
   Eye,
   Gauge,
@@ -13,6 +14,7 @@ import {
   Sliders,
   Sparkles,
   Square,
+  SwitchCamera,
   Target,
   Zap,
 } from "lucide-react";
@@ -106,6 +108,8 @@ function Oracle() {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [watching, setWatching] = useState(false);
+  const [source, setSource] = useState<"screen" | "camera">("screen");
+  const [facing, setFacing] = useState<"environment" | "user">("environment");
   const [tick, setTick] = useState(0); // 0 = auto / adaptive
   const [skill, setSkill] = useState<SkillId>("auto");
   const [focus, setFocus] = useState(false);
@@ -224,25 +228,57 @@ function Oracle() {
     };
   }, [watching, tick, consult]);
 
-  const start = async () => {
+  const attach = async (stream: MediaStream) => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = stream;
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play().catch(() => undefined);
+    }
+    stream.getVideoTracks()[0]?.addEventListener("ended", () => stop());
+    setWatching(true);
+  };
+
+  const start = async (
+    mode: "screen" | "camera" = source,
+    face: "environment" | "user" = facing,
+  ) => {
     setError(null);
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: 15 },
-        audio: false,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => undefined);
-      }
-      stream.getVideoTracks()[0]?.addEventListener("ended", () => stop());
-      setWatching(true);
+      const stream =
+        mode === "camera"
+          ? await navigator.mediaDevices.getUserMedia({
+              video: {
+                facingMode: { ideal: face },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
+                frameRate: { ideal: 15 },
+              },
+              audio: false,
+            })
+          : await navigator.mediaDevices.getDisplayMedia({
+              video: { frameRate: 15 },
+              audio: false,
+            });
+      await attach(stream);
     } catch {
       setError(
-        "Screen sharing was blocked or isn't available on this device. Use a desktop browser and pick your game window.",
+        mode === "camera"
+          ? "Camera access was blocked. Allow camera permission, then point the rear camera at your TV so the screen fills the frame."
+          : "Screen sharing was blocked or isn't available on this device. On a phone, switch to Camera and point it at your TV.",
       );
     }
+  };
+
+  const pickSource = (mode: "screen" | "camera") => {
+    setSource(mode);
+    if (watching) void start(mode, facing);
+  };
+
+  const flipCamera = () => {
+    const next = facing === "environment" ? "user" : "environment";
+    setFacing(next);
+    if (watching && source === "camera") void start("camera", next);
   };
 
   const stop = () => {
@@ -360,6 +396,40 @@ function Oracle() {
               {latency ? `${(latency / 1000).toFixed(1)}s` : "watching"}
             </Badge>
           )}
+          {/* Source toggle: screen share on desktop, rear camera on a phone pointed at the TV. */}
+          <div
+            role="group"
+            aria-label="Video source"
+            className="flex items-center rounded-md border border-border bg-card p-0.5"
+          >
+            <Button
+              variant={source === "screen" ? "secondary" : "ghost"}
+              size="sm"
+              aria-pressed={source === "screen"}
+              onClick={() => pickSource("screen")}
+            >
+              <MonitorPlay className="size-4" /> Screen
+            </Button>
+            <Button
+              variant={source === "camera" ? "secondary" : "ghost"}
+              size="sm"
+              aria-pressed={source === "camera"}
+              onClick={() => pickSource("camera")}
+            >
+              <Camera className="size-4" /> Camera
+            </Button>
+          </div>
+          {source === "camera" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Flip camera"
+              title={facing === "environment" ? "Rear camera" : "Front camera"}
+              onClick={flipCamera}
+            >
+              <SwitchCamera className="size-4" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -373,8 +443,13 @@ function Oracle() {
               <Square className="size-4" /> Stop
             </Button>
           ) : (
-            <Button onClick={start} className="glow-signal">
-              <MonitorPlay className="size-4" /> Let it watch
+            <Button onClick={() => void start()} className="glow-signal">
+              {source === "camera" ? (
+                <Camera className="size-4" />
+              ) : (
+                <MonitorPlay className="size-4" />
+              )}{" "}
+              Let it watch
             </Button>
           )}
         </div>
@@ -414,11 +489,15 @@ function Oracle() {
               {!watching && (
                 <div className="absolute inset-0 grid place-items-center px-6 text-center">
                   <div>
-                    <Gauge className="mx-auto size-8 text-muted-foreground" />
+                    {source === "camera" ? (
+                      <Camera className="mx-auto size-8 text-muted-foreground" />
+                    ) : (
+                      <Gauge className="mx-auto size-8 text-muted-foreground" />
+                    )}
                     <p className="mt-3 text-sm text-muted-foreground">
-                      Share your game window. ORACLE reads the frame as fast as ~1s when the action
-                      is hot, backs off when it's calm, and tunes its calls to how good you already
-                      are.
+                      {source === "camera"
+                        ? "Prop your phone up and point the rear camera at your TV — fill the frame with the screen and avoid glare. Works for Xbox, PlayStation or Switch."
+                        : "Share your game window. ORACLE reads the frame as fast as ~1s when the action is hot, backs off when it's calm, and tunes its calls to how good you already are."}
                     </p>
                   </div>
                 </div>
