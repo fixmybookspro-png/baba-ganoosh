@@ -144,7 +144,9 @@ function Oracle() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const inFlight = useRef(false);
+  const inFlight = useRef(0);
+  const seq = useRef(0);
+  const applied = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [watching, setWatching] = useState(false);
@@ -162,6 +164,9 @@ function Oracle() {
   const [memory, setMemory] = useState<string[]>([]);
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [latency, setLatency] = useState<number | null>(null);
+  const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
+  const [dossierGame, setDossierGame] = useState<string | null>(null);
+  const [dossierLoading, setDossierLoading] = useState(false);
 
   // Live refs so the capture loop always reads current values without restarting.
   const memoryRef = useRef<string[]>([]);
@@ -170,31 +175,90 @@ function Oracle() {
   const hintRef = useRef("");
   const skillRef = useRef<SkillId>("auto");
   const paceRef = useRef<CoachUpdate["pace"]>("fast");
+  const profileRef = useRef<Profile>(EMPTY_PROFILE);
+  const dossierRef = useRef<string | null>(null);
   memoryRef.current = memory;
   feedRef.current = feed;
   objectiveRef.current = objective;
   hintRef.current = gameHint;
   skillRef.current = skill;
+  profileRef.current = profile;
+
+  // Profile + memory survive reloads so a mid-game companion keeps everything it learned.
+  useEffect(() => {
+    try {
+      const p = localStorage.getItem(PROFILE_KEY);
+      if (p) setProfile({ ...EMPTY_PROFILE, ...(JSON.parse(p) as Partial<Profile>) });
+      const m = localStorage.getItem(MEMORY_KEY);
+      if (m) setMemory(JSON.parse(m) as string[]);
+    } catch {
+      /* first run */
+    }
+  }, []);
+
+  const saveProfile = (next: Profile) => {
+    setProfile(next);
+    try {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(next));
+    } catch {
+      /* storage unavailable */
+    }
+  };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MEMORY_KEY, JSON.stringify(memory.slice(-60)));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [memory]);
 
   const grabFrame = useCallback((): string | null => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || !video.videoWidth) return null;
-    const width = 768;
+    // Smaller frame = far less encode + upload time, which is what actually keeps
+    // pace with a game like Cyberpunk.
+    const width = 640;
     const height = Math.round((video.videoHeight / video.videoWidth) * width);
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(video, 0, 0, width, height);
-    return canvas.toDataURL("image/jpeg", 0.55);
+    return canvas.toDataURL("image/jpeg", 0.45);
   }, []);
+
+  // One deep knowledge brief per game — routes, exploits, secret loot — fetched once and
+  // carried on every fast read so the live calls can be terse but genuinely informed.
+  const loadDossier = useCallback(async (game: string) => {
+    const name = game.trim();
+    if (!name || dossierRef.current === null ? false : dossierGame === name) return;
+    setDossierLoading(true);
+    try {
+      const res = await fetch("/api/dossier", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ game: name, skill: skillRef.current, objective: objectiveRef.current }),
+      });
+      const json = (await res.json()) as { dossier?: string };
+      if (json.dossier) {
+        dossierRef.current = json.dossier;
+        setDossierGame(name);
+      }
+    } catch {
+      /* the coach still works without it */
+    } finally {
+      setDossierLoading(false);
+    }
+  }, [dossierGame]);
 
   const consult = useCallback(
     async (message?: string) => {
-      // Never queue up: a busy coach silently skips the tick so play never stalls.
-      if (inFlight.current) return;
-      inFlight.current = true;
+      // Pipelined, never queued: up to two reads in the air, stale answers dropped.
+      if (inFlight.current >= MAX_IN_FLIGHT) return;
+      const id = ++seq.current;
+      inFlight.current += 1;
       setThinking(true);
       const started = performance.now();
       try {
@@ -207,6 +271,8 @@ function Oracle() {
             objective: objectiveRef.current,
             gameHint: hintRef.current,
             skill: skillRef.current,
+            profile: profileRef.current,
+            dossier: dossierRef.current,
             message: message ?? null,
             history: feedRef.current.slice(-8).map((f) => ({ role: f.role, text: f.text })),
           }),
@@ -216,17 +282,22 @@ function Oracle() {
           setError(json.error ?? "The coach could not answer.");
           return;
         }
+        const stale = id < applied.current;
+        applied.current = Math.max(applied.current, id);
         setError(null);
-        setLatency(Math.round(performance.now() - started));
-        setUpdate(json);
         if (json.pace) paceRef.current = json.pace;
+        if (!stale) {
+          setLatency(Math.round(performance.now() - started));
+          setUpdate(json);
+        }
+        if (json.game?.trim() && json.game.trim() !== dossierGame) void loadDossier(json.game);
         if (json.memory_updates?.length) {
           setMemory((prev) => {
             const seen = new Set(prev.map((m) => m.toLowerCase()));
             const added = json.memory_updates.filter(
               (m) => m.trim() && !seen.has(m.trim().toLowerCase()),
             );
-            return [...prev, ...added].slice(-40);
+            return [...prev, ...added].slice(-60);
           });
         }
         if (json.reply?.trim()) {
@@ -243,30 +314,32 @@ function Oracle() {
       } catch {
         setError("Lost contact with the coach. Retrying on the next tick.");
       } finally {
-        inFlight.current = false;
-        setThinking(false);
+        inFlight.current -= 1;
+        if (inFlight.current <= 0) setThinking(false);
       }
     },
-    [grabFrame],
+    [grabFrame, dossierGame, loadDossier],
   );
 
-  // Self-scheduling loop: the next capture is queued only after the last one settles, and in
-  // auto mode the gap follows how fast the game is actually moving.
+  // Self-scheduling loop: the gap follows how fast the game is actually moving, and a
+  // read is fired without waiting for the previous one to land.
   useEffect(() => {
     if (!watching) return;
     let cancelled = false;
-    const run = async () => {
-      await consult();
+    const run = () => {
+      void consult();
       if (cancelled) return;
       const gap = tick === 0 ? PACE_TICK[paceRef.current] : tick;
       timer.current = setTimeout(run, gap);
     };
-    timer.current = setTimeout(run, 400);
+    timer.current = setTimeout(run, 300);
     return () => {
       cancelled = true;
       if (timer.current) clearTimeout(timer.current);
     };
   }, [watching, tick, consult]);
+
+
 
   const attach = async (stream: MediaStream) => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
