@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  BookOpen,
   Brain,
   Camera,
   Crosshair,
@@ -16,6 +17,7 @@ import {
   Square,
   SwitchCamera,
   Target,
+  UserRound,
   Zap,
 } from "lucide-react";
 
@@ -29,8 +31,8 @@ import { cn } from "@/lib/utils";
 type CoachUpdate = {
   game: string;
   situation: string;
-  objective_status: string;
   next_actions: string[];
+  prep: string[];
   secrets: string[];
   memory_updates: string[];
   reply: string | null;
@@ -46,12 +48,47 @@ type FeedItem = {
   at: string;
 };
 
+// Everything the coach can't see because the player started mid-game.
+type Profile = {
+  platform: string;
+  progress: string;
+  build: string;
+  style: string;
+  goals: string;
+  avoid: string;
+};
+
+const EMPTY_PROFILE: Profile = {
+  platform: "",
+  progress: "",
+  build: "",
+  style: "",
+  goals: "",
+  avoid: "",
+};
+
+const PROFILE_FIELDS: { key: keyof Profile; label: string; placeholder: string }[] = [
+  { key: "platform", label: "platform", placeholder: "PC / Xbox Series X / PS5 + controller" },
+  {
+    key: "progress",
+    label: "where you are",
+    placeholder: "Act 2, Voodoo Boys quest, level 28, ~30h in",
+  },
+  { key: "build", label: "build & loadout", placeholder: "netrunner, Sandevistan, smart SMG" },
+  { key: "style", label: "how you play", placeholder: "stealth first, hate driving, aggressive" },
+  { key: "goals", label: "goals", placeholder: "best ending, max street cred, no side junk" },
+  { key: "avoid", label: "don't tell me", placeholder: "story spoilers, basics, side quests" },
+];
+
+const PROFILE_KEY = "oracle:profile";
+const MEMORY_KEY = "oracle:memory";
+
 const TICKS = [
   { label: "auto", value: 0 },
+  { label: "0.6s", value: 600 },
   { label: "1s", value: 1000 },
   { label: "2s", value: 2000 },
   { label: "4s", value: 4000 },
-  { label: "8s", value: 8000 },
 ];
 
 const SKILLS = [
@@ -70,13 +107,18 @@ const urgencyStyles: Record<CoachUpdate["urgency"], string> = {
   urgent: "bg-danger text-destructive-foreground",
 };
 
-// Adaptive cadence: fast-moving frames get read almost every second, calm ones back off
-// so nothing is wasted on menus or downtime.
+// Adaptive cadence: twitch frames are read ~2x/second, calm ones back off so nothing
+// is wasted on menus or downtime.
 const PACE_TICK: Record<CoachUpdate["pace"], number> = {
-  twitch: 1000,
-  fast: 1800,
-  steady: 4000,
+  twitch: 500,
+  fast: 1100,
+  steady: 3000,
 };
+
+// Two reads may be in the air at once so a slow answer never creates a gap; stale
+// answers are dropped by sequence number.
+const MAX_IN_FLIGHT = 2;
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -104,7 +146,9 @@ function Oracle() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const inFlight = useRef(false);
+  const inFlight = useRef(0);
+  const seq = useRef(0);
+  const applied = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [watching, setWatching] = useState(false);
@@ -122,6 +166,9 @@ function Oracle() {
   const [memory, setMemory] = useState<string[]>([]);
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [latency, setLatency] = useState<number | null>(null);
+  const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
+  const [dossierGame, setDossierGame] = useState<string | null>(null);
+  const [dossierLoading, setDossierLoading] = useState(false);
 
   // Live refs so the capture loop always reads current values without restarting.
   const memoryRef = useRef<string[]>([]);
@@ -130,31 +177,90 @@ function Oracle() {
   const hintRef = useRef("");
   const skillRef = useRef<SkillId>("auto");
   const paceRef = useRef<CoachUpdate["pace"]>("fast");
+  const profileRef = useRef<Profile>(EMPTY_PROFILE);
+  const dossierRef = useRef<string | null>(null);
   memoryRef.current = memory;
   feedRef.current = feed;
   objectiveRef.current = objective;
   hintRef.current = gameHint;
   skillRef.current = skill;
+  profileRef.current = profile;
+
+  // Profile + memory survive reloads so a mid-game companion keeps everything it learned.
+  useEffect(() => {
+    try {
+      const p = localStorage.getItem(PROFILE_KEY);
+      if (p) setProfile({ ...EMPTY_PROFILE, ...(JSON.parse(p) as Partial<Profile>) });
+      const m = localStorage.getItem(MEMORY_KEY);
+      if (m) setMemory(JSON.parse(m) as string[]);
+    } catch {
+      /* first run */
+    }
+  }, []);
+
+  const saveProfile = (next: Profile) => {
+    setProfile(next);
+    try {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(next));
+    } catch {
+      /* storage unavailable */
+    }
+  };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MEMORY_KEY, JSON.stringify(memory.slice(-60)));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [memory]);
 
   const grabFrame = useCallback((): string | null => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || !video.videoWidth) return null;
-    const width = 768;
+    // Smaller frame = far less encode + upload time, which is what actually keeps
+    // pace with a game like Cyberpunk.
+    const width = 640;
     const height = Math.round((video.videoHeight / video.videoWidth) * width);
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(video, 0, 0, width, height);
-    return canvas.toDataURL("image/jpeg", 0.55);
+    return canvas.toDataURL("image/jpeg", 0.45);
   }, []);
+
+  // One deep knowledge brief per game — routes, exploits, secret loot — fetched once and
+  // carried on every fast read so the live calls can be terse but genuinely informed.
+  const loadDossier = useCallback(async (game: string) => {
+    const name = game.trim();
+    if (!name || dossierGame === name) return;
+    setDossierLoading(true);
+    try {
+      const res = await fetch("/api/dossier", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ game: name, skill: skillRef.current, objective: objectiveRef.current }),
+      });
+      const json = (await res.json()) as { dossier?: string };
+      if (json.dossier) {
+        dossierRef.current = json.dossier;
+        setDossierGame(name);
+      }
+    } catch {
+      /* the coach still works without it */
+    } finally {
+      setDossierLoading(false);
+    }
+  }, [dossierGame]);
 
   const consult = useCallback(
     async (message?: string) => {
-      // Never queue up: a busy coach silently skips the tick so play never stalls.
-      if (inFlight.current) return;
-      inFlight.current = true;
+      // Pipelined, never queued: up to two reads in the air, stale answers dropped.
+      if (inFlight.current >= MAX_IN_FLIGHT) return;
+      const id = ++seq.current;
+      inFlight.current += 1;
       setThinking(true);
       const started = performance.now();
       try {
@@ -167,6 +273,8 @@ function Oracle() {
             objective: objectiveRef.current,
             gameHint: hintRef.current,
             skill: skillRef.current,
+            profile: profileRef.current,
+            dossier: dossierRef.current,
             message: message ?? null,
             history: feedRef.current.slice(-8).map((f) => ({ role: f.role, text: f.text })),
           }),
@@ -176,17 +284,22 @@ function Oracle() {
           setError(json.error ?? "The coach could not answer.");
           return;
         }
+        const stale = id < applied.current;
+        applied.current = Math.max(applied.current, id);
         setError(null);
-        setLatency(Math.round(performance.now() - started));
-        setUpdate(json);
         if (json.pace) paceRef.current = json.pace;
+        if (!stale) {
+          setLatency(Math.round(performance.now() - started));
+          setUpdate(json);
+        }
+        if (json.game?.trim() && json.game.trim() !== dossierGame) void loadDossier(json.game);
         if (json.memory_updates?.length) {
           setMemory((prev) => {
             const seen = new Set(prev.map((m) => m.toLowerCase()));
             const added = json.memory_updates.filter(
               (m) => m.trim() && !seen.has(m.trim().toLowerCase()),
             );
-            return [...prev, ...added].slice(-40);
+            return [...prev, ...added].slice(-60);
           });
         }
         if (json.reply?.trim()) {
@@ -203,30 +316,32 @@ function Oracle() {
       } catch {
         setError("Lost contact with the coach. Retrying on the next tick.");
       } finally {
-        inFlight.current = false;
-        setThinking(false);
+        inFlight.current -= 1;
+        if (inFlight.current <= 0) setThinking(false);
       }
     },
-    [grabFrame],
+    [grabFrame, dossierGame, loadDossier],
   );
 
-  // Self-scheduling loop: the next capture is queued only after the last one settles, and in
-  // auto mode the gap follows how fast the game is actually moving.
+  // Self-scheduling loop: the gap follows how fast the game is actually moving, and a
+  // read is fired without waiting for the previous one to land.
   useEffect(() => {
     if (!watching) return;
     let cancelled = false;
-    const run = async () => {
-      await consult();
+    const run = () => {
+      void consult();
       if (cancelled) return;
       const gap = tick === 0 ? PACE_TICK[paceRef.current] : tick;
       timer.current = setTimeout(run, gap);
     };
-    timer.current = setTimeout(run, 400);
+    timer.current = setTimeout(run, 300);
     return () => {
       cancelled = true;
       if (timer.current) clearTimeout(timer.current);
     };
   }, [watching, tick, consult]);
+
+
 
   const attach = async (stream: MediaStream) => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -342,13 +457,29 @@ function Oracle() {
           </li>
         ))}
       </ol>
+      {update?.prep?.length ? (
+        <div className="mt-4 border-t border-border pt-3">
+          <span className="hud-label">set up next</span>
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {update.prep.map((p, i) => (
+              <li
+                key={`${i}-${p}`}
+                className="rounded bg-surface-2 px-2 py-1 font-mono text-xs text-muted-foreground"
+              >
+                {p}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {update?.situation && (
-        <p className="mt-4 border-t border-border pt-3 text-sm text-muted-foreground">
+        <p className="mt-3 border-t border-border pt-3 text-sm text-muted-foreground">
           {update.situation}
         </p>
       )}
     </div>
   );
+
 
   const askForm = (
     <form
@@ -514,8 +645,11 @@ function Oracle() {
         {/* ── Everything else: one tab at a time, never competing ───── */}
         <section className={cn("space-y-4", focus && "hidden")}>
 
-            <Tabs defaultValue="talk">
+            <Tabs defaultValue="player">
               <TabsList className="w-full">
+                <TabsTrigger value="player" className="flex-1 text-xs">
+                  Player
+                </TabsTrigger>
                 <TabsTrigger value="talk" className="flex-1 text-xs">
                   Talk
                 </TabsTrigger>
@@ -529,6 +663,59 @@ function Oracle() {
                   Tune
                 </TabsTrigger>
               </TabsList>
+
+              <TabsContent value="player">
+                <div className="hud-panel p-4">
+                  <div className="flex items-center gap-2">
+                    <UserRound className="size-4 text-accent" />
+                    <span className="hud-label">player card</span>
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Joined mid-game? Fill this once. It's saved on this device and sent with every
+                    read, so ORACLE knows your build, progress and taste before it sees a frame.
+                  </p>
+                  <div className="mt-3 space-y-2.5">
+                    {PROFILE_FIELDS.map((f) => (
+                      <label key={f.key} className="block">
+                        <span className="hud-label">{f.label}</span>
+                        <Input
+                          value={profile[f.key]}
+                          onChange={(e) => saveProfile({ ...profile, [f.key]: e.target.value })}
+                          placeholder={f.placeholder}
+                          className="mt-1 font-mono text-sm"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {dossierLoading
+                        ? "loading game knowledge…"
+                        : dossierGame
+                          ? `knowledge loaded: ${dossierGame}`
+                          : "no game knowledge yet"}
+                    </span>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-8 text-xs"
+                      disabled={dossierLoading || !(gameHint.trim() || update?.game?.trim())}
+                      onClick={() => void loadDossier(gameHint.trim() || update?.game || "")}
+                    >
+                      <BookOpen className="size-3.5" /> Load game knowledge
+                    </Button>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-1 h-7 px-2 text-xs text-muted-foreground"
+                    onClick={() => saveProfile(EMPTY_PROFILE)}
+                  >
+                    Clear player card
+                  </Button>
+                </div>
+              </TabsContent>
+
 
               <TabsContent value="talk">
                 <div className="hud-panel flex h-[28rem] flex-col p-4">
@@ -648,9 +835,10 @@ function Oracle() {
                       className="mt-2 font-mono text-sm"
                     />
                     <p className="mt-3 text-sm text-muted-foreground">
-                      {update?.objective_status ??
-                        "Steer it any time — farm loot, speedrun, no-hit, chaos."}
+                      Steer it any time — farm loot, speedrun, no-hit, chaos. Naming the game loads
+                      its deep knowledge brief instantly.
                     </p>
+
                   </div>
 
                   <div className="hud-panel p-4">
