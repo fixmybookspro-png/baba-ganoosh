@@ -74,6 +74,7 @@ export const Route = createFileRoute("/api/dossier")({
                 { role: "system", content: SYSTEM },
                 { role: "user", content: prompt },
               ],
+              reasoning: { effort: "none" },
               max_tokens: 2400,
             }),
           });
