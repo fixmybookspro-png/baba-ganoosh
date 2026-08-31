@@ -643,8 +643,11 @@ function Oracle() {
         {/* ── Everything else: one tab at a time, never competing ───── */}
         <section className={cn("space-y-4", focus && "hidden")}>
 
-            <Tabs defaultValue="talk">
+            <Tabs defaultValue="player">
               <TabsList className="w-full">
+                <TabsTrigger value="player" className="flex-1 text-xs">
+                  Player
+                </TabsTrigger>
                 <TabsTrigger value="talk" className="flex-1 text-xs">
                   Talk
                 </TabsTrigger>
@@ -658,6 +661,59 @@ function Oracle() {
                   Tune
                 </TabsTrigger>
               </TabsList>
+
+              <TabsContent value="player">
+                <div className="hud-panel p-4">
+                  <div className="flex items-center gap-2">
+                    <UserRound className="size-4 text-accent" />
+                    <span className="hud-label">player card</span>
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Joined mid-game? Fill this once. It's saved on this device and sent with every
+                    read, so ORACLE knows your build, progress and taste before it sees a frame.
+                  </p>
+                  <div className="mt-3 space-y-2.5">
+                    {PROFILE_FIELDS.map((f) => (
+                      <label key={f.key} className="block">
+                        <span className="hud-label">{f.label}</span>
+                        <Input
+                          value={profile[f.key]}
+                          onChange={(e) => saveProfile({ ...profile, [f.key]: e.target.value })}
+                          placeholder={f.placeholder}
+                          className="mt-1 font-mono text-sm"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {dossierLoading
+                        ? "loading game knowledge…"
+                        : dossierGame
+                          ? `knowledge loaded: ${dossierGame}`
+                          : "no game knowledge yet"}
+                    </span>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-8 text-xs"
+                      disabled={dossierLoading || !(gameHint.trim() || update?.game?.trim())}
+                      onClick={() => void loadDossier(gameHint.trim() || update?.game || "")}
+                    >
+                      <BookOpen className="size-3.5" /> Load game knowledge
+                    </Button>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-1 h-7 px-2 text-xs text-muted-foreground"
+                    onClick={() => saveProfile(EMPTY_PROFILE)}
+                  >
+                    Clear player card
+                  </Button>
+                </div>
+              </TabsContent>
+
 
               <TabsContent value="talk">
                 <div className="hud-panel flex h-[28rem] flex-col p-4">
