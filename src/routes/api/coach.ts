@@ -8,6 +8,7 @@ type CoachRequest = {
   history?: { role: "user" | "assistant"; text: string }[];
   gameHint?: string;
   skill?: string;
+  dossier?: string | null;
 };
 
 const SCHEMA = {
@@ -16,8 +17,8 @@ const SCHEMA = {
   required: [
     "game",
     "situation",
-    "objective_status",
     "next_actions",
+    "prep",
     "secrets",
     "memory_updates",
     "reply",
@@ -28,8 +29,8 @@ const SCHEMA = {
   properties: {
     game: { type: "string" },
     situation: { type: "string" },
-    objective_status: { type: "string" },
     next_actions: { type: "array", items: { type: "string" } },
+    prep: { type: "array", items: { type: "string" } },
     secrets: { type: "array", items: { type: "string" } },
     memory_updates: { type: "array", items: { type: "string" } },
     reply: { type: ["string", "null"] },
@@ -39,23 +40,27 @@ const SCHEMA = {
   },
 } as const;
 
-const SYSTEM = `You are ORACLE, the world's smartest gamer and live coach. You watch a single screenshot from the player's live gameplay and coach them in real time.
+const SYSTEM = `You are ORACLE, the world's best gamer, coaching a player who is ACTIVELY PLAYING right now. They cannot read. They glance.
 
-Rules:
-- Identify the game, then read the HUD precisely: health, ammo, resources, timers, score, lives, quest text, minimap, menus, enemies.
-- The frame may already be 1-3 seconds old and dense games (Cyberpunk 2077, Elden Ring, Warzone) move fast. Never narrate what is already happening; call what the player should do in the NEXT few seconds, and prefer advice that stays true even if the scene shifted slightly.
-- Be extremely concise. next_actions = 1-3 imperative micro-instructions (e.g. "Strafe right, reload behind the crate"). No fluff, no preamble.
-- SKILL CALIBRATION: never state anything a player at their level already knows. Drop tutorial/beginner steps (basic controls, "open your inventory", "aim for the head", "use cover", generic difficulty warnings) unless their play clearly shows they need it. Higher skill = terser, more advanced, assume mechanics knowledge, talk in optimal lines, DPS windows, i-frames, routing and build synergies. If nothing non-obvious is worth saying, return ONE high-value call rather than padding to three.
-- skill_read = your short read of the player's level based on their play and memory (e.g. "veteran — clean movement, efficient looting"). If the player locked a level, respect it exactly and echo it.
-- pace = how fast this screen is changing, so the app can time its next look: "twitch" (combat, chase, boss, timer), "fast" (exploring with threats near), "steady" (menu, safe zone, cutscene, loading).
-- secrets = only when genuinely relevant to what is on screen right now: known glitches, speedrun tricks, exploits, hidden items, Easter eggs, skips, frame-perfect techniques, dev secrets for this exact area/level. Empty array if nothing applies. Skip anything widely known to a player at their level.
-- memory_updates = short durable facts worth remembering across the session (build, loadout, objective progress, boss phase learned, resources, skill evidence, player's stated preferences). Only NEW or CHANGED facts. Never repeat existing memory.
-- objective_status = one line on progress toward the player's stated objective.
-- reply = a direct answer only when the player asked something or steered the plan; otherwise null.
-- Respect the player's steering objective over "win the game" if they set one.
-- urgency: "urgent" if they are about to die / lose / miss a window.
-- If the screen is a menu, loading, or non-game content, say so plainly in situation and coach accordingly.`;
+HARD BANS — never output these:
+- Narrating the screen ("you are in combat", "you're low on health", "you're exploring").
+- Anything obvious to anyone with eyes, or any tutorial/beginner step (open inventory, use cover, aim for the head, save your game, watch your health).
+- Generic filler ("stay alert", "be careful", "keep an eye on your surroundings", "manage resources").
+- Preamble, explanations, hedging, punctuation-heavy sentences.
 
+INSTEAD: solve it. If they need health, say WHERE the health is. If they're wandering, say where to GO and what to DO there. Every line must contain a place, direction, target, item, button/combo, number or route the player did not already know.
+
+FORMAT:
+- next_actions: 1-3 lines, each 3-8 WORDS MAX, imperative, most urgent first. e.g. "Vending machine, alley left, buy 2 maxdocs" / "Quickhack Reboot Optics on sniper, roof right".
+- prep: up to 4 ultra-short lines setting them up 1-5 steps AHEAD of the current frame — what's coming, where to be, what to hold, what to buy/save/spec for next. Same 3-8 word budget. This is the "think five steps ahead" channel; keep it out of next_actions.
+- The frame is 1-3 seconds stale and fast games (Cyberpunk 2077, Warzone, Elden Ring) move constantly. Call what will still be true in the NEXT few seconds. Bias to advice tied to the map, build, objective and enemy layout rather than exact pixel positions.
+- situation: max 8 words, state only, no advice.
+- skill_read: short read of their level; if locked, echo it. Higher skill = terser, advanced lines (DPS windows, i-frames, routing, build synergy). Never say anything below their level.
+- pace: "twitch" (combat/chase/timer), "fast" (threats near), "steady" (menu/safe/cutscene/loading).
+- secrets: only tricks that apply to THIS area/state right now — glitches, skips, exploits, hidden loot, Easter eggs, frame-perfect tech, dev secrets. Use the GAME DOSSIER below when given. Empty array if nothing fits. Nothing widely known at their level.
+- memory_updates: only NEW/CHANGED durable facts (build, loadout, quest step, boss phase, resources, currency, level, preferences). Never repeat memory.
+- reply: only when they asked or steered; else null.
+- Menus/loading/non-game: say so in situation in <=8 words and coach the menu (what to buy, spec, equip next).`;
 
 export const Route = createFileRoute("/api/coach")({
   server: {
@@ -80,7 +85,7 @@ export const Route = createFileRoute("/api/coach")({
         }
 
         const memory = (body.memory ?? []).slice(-40);
-        const history = (body.history ?? []).slice(-8);
+        const history = (body.history ?? []).slice(-6);
 
         const context = [
           `PLAYER OBJECTIVE: ${body.objective?.trim() || "Win the game as efficiently as possible."}`,
@@ -88,27 +93,29 @@ export const Route = createFileRoute("/api/coach")({
           body.skill && body.skill !== "auto"
             ? `PLAYER SKILL LEVEL (locked by them): ${body.skill}. Never say anything below this level.`
             : "PLAYER SKILL LEVEL: unknown — infer it from their play and memory, and calibrate every call to it.",
-
+          body.dossier?.trim()
+            ? `GAME DOSSIER (deep knowledge of this game — routes, exploits, tricks, best builds; use it, don't repeat it verbatim):\n${body.dossier.trim().slice(0, 8000)}`
+            : "",
           memory.length ? `SESSION MEMORY:\n- ${memory.join("\n- ")}` : "SESSION MEMORY: (empty)",
           history.length
             ? `RECENT DIALOGUE:\n${history.map((h) => `${h.role === "user" ? "PLAYER" : "ORACLE"}: ${h.text}`).join("\n")}`
             : "",
           body.message?.trim() ? `PLAYER JUST SAID: "${body.message.trim()}"` : "",
           body.frame
-            ? "Here is the current frame of their screen."
+            ? "Current frame of their screen follows. It is ~2s stale — coach the next few seconds."
             : "No frame available; answer from memory only.",
         ]
           .filter(Boolean)
           .join("\n\n");
 
-        const content: Record<string, unknown>[] = [{ type: "input_text", text: context }];
+        const content: Record<string, unknown>[] = [{ type: "text", text: context }];
         if (body.frame) {
-          content.push({ type: "input_image", image_url: body.frame, detail: "low" });
+          content.push({ type: "image_url", image_url: { url: body.frame } });
         }
 
         let res: Response;
         try {
-          res = await fetch("https://ai.gateway.lovable.dev/v1/responses", {
+          res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -116,20 +123,16 @@ export const Route = createFileRoute("/api/coach")({
               "X-Lovable-AIG-SDK": "fetch",
             },
             body: JSON.stringify({
-              model: "openai/gpt-5.6-luna",
-              stream: true,
-              store: false,
-              service_tier: "priority",
-              instructions: SYSTEM,
-              input: [{ role: "user", content }],
-              reasoning: { effort: "low" },
-              text: {
-                format: {
-                  type: "json_schema",
-                  name: "coach_update",
-                  strict: true,
-                  schema: SCHEMA,
-                },
+              // Low-latency multimodal model: real-time coaching needs sub-second-ish reads.
+              model: "google/gemini-3.7-flash",
+              messages: [
+                { role: "system", content: SYSTEM },
+                { role: "user", content },
+              ],
+              max_tokens: 700,
+              response_format: {
+                type: "json_schema",
+                json_schema: { name: "coach_update", strict: true, schema: SCHEMA },
               },
             }),
           });
@@ -140,7 +143,7 @@ export const Route = createFileRoute("/api/coach")({
           });
         }
 
-        if (!res.ok || !res.body) {
+        if (!res.ok) {
           const detail = await res.text().catch(() => "");
           let message = "The AI coach failed.";
           try {
@@ -155,34 +158,10 @@ export const Route = createFileRoute("/api/coach")({
           });
         }
 
-        // Read the SSE stream and accumulate the output text (streaming is required
-        // on /v1/responses; nothing here renders progressively).
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let text = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            const payload = line.slice(5).trim();
-            if (!payload || payload === "[DONE]") continue;
-            try {
-              const evt = JSON.parse(payload);
-              if (evt.type === "response.output_text.delta" && typeof evt.delta === "string") {
-                text += evt.delta;
-              } else if (evt.type === "response.completed" && !text) {
-                text = evt.response?.output_text ?? "";
-              }
-            } catch {
-              // ignore keep-alives / partial frames
-            }
-          }
-        }
+        const json = (await res.json().catch(() => null)) as
+          | { choices?: { message?: { content?: string } }[] }
+          | null;
+        const text = json?.choices?.[0]?.message?.content ?? "";
 
         let parsed: unknown = null;
         try {
