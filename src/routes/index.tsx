@@ -396,6 +396,40 @@ function Oracle() {
               {latency ? `${(latency / 1000).toFixed(1)}s` : "watching"}
             </Badge>
           )}
+          {/* Source toggle: screen share on desktop, rear camera on a phone pointed at the TV. */}
+          <div
+            role="group"
+            aria-label="Video source"
+            className="flex items-center rounded-md border border-border bg-card p-0.5"
+          >
+            <Button
+              variant={source === "screen" ? "secondary" : "ghost"}
+              size="sm"
+              aria-pressed={source === "screen"}
+              onClick={() => pickSource("screen")}
+            >
+              <MonitorPlay className="size-4" /> Screen
+            </Button>
+            <Button
+              variant={source === "camera" ? "secondary" : "ghost"}
+              size="sm"
+              aria-pressed={source === "camera"}
+              onClick={() => pickSource("camera")}
+            >
+              <Camera className="size-4" /> Camera
+            </Button>
+          </div>
+          {source === "camera" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Flip camera"
+              title={facing === "environment" ? "Rear camera" : "Front camera"}
+              onClick={flipCamera}
+            >
+              <SwitchCamera className="size-4" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -409,8 +443,13 @@ function Oracle() {
               <Square className="size-4" /> Stop
             </Button>
           ) : (
-            <Button onClick={start} className="glow-signal">
-              <MonitorPlay className="size-4" /> Let it watch
+            <Button onClick={() => void start()} className="glow-signal">
+              {source === "camera" ? (
+                <Camera className="size-4" />
+              ) : (
+                <MonitorPlay className="size-4" />
+              )}{" "}
+              Let it watch
             </Button>
           )}
         </div>
