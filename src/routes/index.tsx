@@ -833,7 +833,8 @@ function Oracle() {
                       className="mt-2 font-mono text-sm"
                     />
                     <p className="mt-3 text-sm text-muted-foreground">
-                      {update?.objective_status ??
+                      {update?.skill_read ??
+
                         "Steer it any time — farm loot, speedrun, no-hit, chaos."}
                     </p>
                   </div>
