@@ -455,13 +455,29 @@ function Oracle() {
           </li>
         ))}
       </ol>
+      {update?.prep?.length ? (
+        <div className="mt-4 border-t border-border pt-3">
+          <span className="hud-label">set up next</span>
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {update.prep.map((p, i) => (
+              <li
+                key={`${i}-${p}`}
+                className="rounded bg-surface-2 px-2 py-1 font-mono text-xs text-muted-foreground"
+              >
+                {p}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {update?.situation && (
-        <p className="mt-4 border-t border-border pt-3 text-sm text-muted-foreground">
+        <p className="mt-3 border-t border-border pt-3 text-sm text-muted-foreground">
           {update.situation}
         </p>
       )}
     </div>
   );
+
 
   const askForm = (
     <form
