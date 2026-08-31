@@ -108,6 +108,8 @@ function Oracle() {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [watching, setWatching] = useState(false);
+  const [source, setSource] = useState<"screen" | "camera">("screen");
+  const [facing, setFacing] = useState<"environment" | "user">("environment");
   const [tick, setTick] = useState(0); // 0 = auto / adaptive
   const [skill, setSkill] = useState<SkillId>("auto");
   const [focus, setFocus] = useState(false);
