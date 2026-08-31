@@ -29,8 +29,8 @@ import { cn } from "@/lib/utils";
 type CoachUpdate = {
   game: string;
   situation: string;
-  objective_status: string;
   next_actions: string[];
+  prep: string[];
   secrets: string[];
   memory_updates: string[];
   reply: string | null;
@@ -46,12 +46,47 @@ type FeedItem = {
   at: string;
 };
 
+// Everything the coach can't see because the player started mid-game.
+type Profile = {
+  platform: string;
+  progress: string;
+  build: string;
+  style: string;
+  goals: string;
+  avoid: string;
+};
+
+const EMPTY_PROFILE: Profile = {
+  platform: "",
+  progress: "",
+  build: "",
+  style: "",
+  goals: "",
+  avoid: "",
+};
+
+const PROFILE_FIELDS: { key: keyof Profile; label: string; placeholder: string }[] = [
+  { key: "platform", label: "platform", placeholder: "PC / Xbox Series X / PS5 + controller" },
+  {
+    key: "progress",
+    label: "where you are",
+    placeholder: "Act 2, Voodoo Boys quest, level 28, ~30h in",
+  },
+  { key: "build", label: "build & loadout", placeholder: "netrunner, Sandevistan, smart SMG" },
+  { key: "style", label: "how you play", placeholder: "stealth first, hate driving, aggressive" },
+  { key: "goals", label: "goals", placeholder: "best ending, max street cred, no side junk" },
+  { key: "avoid", label: "don't tell me", placeholder: "story spoilers, basics, side quests" },
+];
+
+const PROFILE_KEY = "oracle:profile";
+const MEMORY_KEY = "oracle:memory";
+
 const TICKS = [
   { label: "auto", value: 0 },
+  { label: "0.6s", value: 600 },
   { label: "1s", value: 1000 },
   { label: "2s", value: 2000 },
   { label: "4s", value: 4000 },
-  { label: "8s", value: 8000 },
 ];
 
 const SKILLS = [
@@ -70,13 +105,18 @@ const urgencyStyles: Record<CoachUpdate["urgency"], string> = {
   urgent: "bg-danger text-destructive-foreground",
 };
 
-// Adaptive cadence: fast-moving frames get read almost every second, calm ones back off
-// so nothing is wasted on menus or downtime.
+// Adaptive cadence: twitch frames are read ~2x/second, calm ones back off so nothing
+// is wasted on menus or downtime.
 const PACE_TICK: Record<CoachUpdate["pace"], number> = {
-  twitch: 1000,
-  fast: 1800,
-  steady: 4000,
+  twitch: 500,
+  fast: 1100,
+  steady: 3000,
 };
+
+// Two reads may be in the air at once so a slow answer never creates a gap; stale
+// answers are dropped by sequence number.
+const MAX_IN_FLIGHT = 2;
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
