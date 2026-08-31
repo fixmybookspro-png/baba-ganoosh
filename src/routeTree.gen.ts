@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiCoachRouteImport } from './routes/api/coach'
+import { Route as ApiDossierRouteImport } from './routes/api/dossier'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,31 +23,40 @@ const ApiCoachRoute = ApiCoachRouteImport.update({
   path: '/api/coach',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiDossierRoute = ApiDossierRouteImport.update({
+  id: '/api/dossier',
+  path: '/api/dossier',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/coach': typeof ApiCoachRoute
+  '/api/dossier': typeof ApiDossierRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/coach': typeof ApiCoachRoute
+  '/api/dossier': typeof ApiDossierRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/api/coach': typeof ApiCoachRoute
+  '/api/dossier': typeof ApiDossierRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/coach'
+  fullPaths: '/' | '/api/coach' | '/api/dossier'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/coach'
-  id: '__root__' | '/' | '/api/coach'
+  to: '/' | '/api/coach' | '/api/dossier'
+  id: '__root__' | '/' | '/api/coach' | '/api/dossier'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiCoachRoute: typeof ApiCoachRoute
+  ApiDossierRoute: typeof ApiDossierRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -65,12 +75,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCoachRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/dossier': {
+      id: '/api/dossier'
+      path: '/api/dossier'
+      fullPath: '/api/dossier'
+      preLoaderRoute: typeof ApiDossierRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiCoachRoute: ApiCoachRoute,
+  ApiDossierRoute: ApiDossierRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
