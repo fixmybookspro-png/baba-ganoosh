@@ -129,7 +129,10 @@ export const Route = createFileRoute("/api/coach")({
                 { role: "system", content: SYSTEM },
                 { role: "user", content },
               ],
-              max_tokens: 700,
+              // Gemini 3.x thinks by default and burns the whole budget on reasoning
+              // tokens, returning empty content. Real-time coaching wants no thinking.
+              reasoning: { effort: "none" },
+              max_tokens: 1200,
               response_format: {
                 type: "json_schema",
                 json_schema: { name: "coach_update", strict: true, schema: SCHEMA },
