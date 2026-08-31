@@ -233,7 +233,7 @@ function Oracle() {
   // carried on every fast read so the live calls can be terse but genuinely informed.
   const loadDossier = useCallback(async (game: string) => {
     const name = game.trim();
-    if (!name || dossierRef.current === null ? false : dossierGame === name) return;
+    if (!name || dossierGame === name) return;
     setDossierLoading(true);
     try {
       const res = await fetch("/api/dossier", {
