@@ -116,6 +116,8 @@ const PROFILE_FIELDS: { key: keyof Profile; label: string; placeholder: string }
 
 const PROFILE_KEY = "oracle:profile";
 const MEMORY_KEY = "oracle:memory";
+const STATE_KEY = "oracle:state";
+const SESSION_KEY = "oracle:session";
 
 const TICKS = [
   { label: "auto", value: 0 },
@@ -135,11 +137,17 @@ const SKILLS = [
 
 type SkillId = (typeof SKILLS)[number]["id"];
 
-const urgencyStyles: Record<CoachUpdate["urgency"], string> = {
+// Below this, an alert isn't worth the player's attention — ORACLE stays silent.
+const SPEAK_FLOOR = 30;
+const MIN_SCAN = 400;
+const MAX_SCAN = 10000;
+
+const urgencyStyles: Record<CoachUpdate["speak"]["urgency"], string> = {
   calm: "bg-secondary text-secondary-foreground",
   act: "bg-warn text-accent-foreground",
   urgent: "bg-danger text-destructive-foreground",
 };
+
 
 // Adaptive cadence: twitch frames are read ~2x/second, calm ones back off so nothing
 // is wasted on menus or downtime.
