@@ -340,6 +340,9 @@ function Oracle() {
       inFlight.current += 1;
       setThinking(true);
       const started = performance.now();
+      const now = Date.now();
+      callTimesRef.current = [...callTimesRef.current, now].filter((t) => now - t < 60_000);
+      setCallsPerMin(callTimesRef.current.length);
       try {
         const res = await fetch("/api/coach", {
           method: "POST",
@@ -352,8 +355,15 @@ function Oracle() {
             skill: skillRef.current,
             profile: profileRef.current,
             dossier: dossierRef.current,
+            state: stateRef.current,
+            lastInstruction: lastCallRef.current,
+            repeats: repeatsRef.current,
+            failed: failedRef.current,
+            worked: workedRef.current,
+            sessionSummary: summaryRef.current,
+            wantsVideo: message ? /show me|show it|video|watch it/i.test(message) : false,
             message: message ?? null,
-            history: feedRef.current.slice(-8).map((f) => ({ role: f.role, text: f.text })),
+            history: feedRef.current.slice(-6).map((f) => ({ role: f.role, text: f.text })),
           }),
         });
         const json = (await res.json()) as CoachUpdate & { error?: string };
@@ -365,9 +375,60 @@ function Oracle() {
         applied.current = Math.max(applied.current, id);
         setError(null);
         if (json.pace) paceRef.current = json.pace;
+
+        // Adaptive scanning: the model sets the next gap from the state it just read.
+        const nextScan = Math.min(
+          MAX_SCAN,
+          Math.max(MIN_SCAN, Math.round(json.scan_ms || PACE_TICK[paceRef.current])),
+        );
+        scanRef.current = nextScan;
+        if (!stale) setScanMs(nextScan);
+
         if (!stale) {
           setLatency(Math.round(performance.now() - started));
           setUpdate(json);
+
+          // SPEAK gate: quiet unless it matters, and never the same line twice.
+          const actions = (json.speak?.actions ?? []).filter((a) => a.trim());
+          const importance = json.speak?.importance ?? 0;
+          const confident = (json.see?.confidence ?? 1) >= 0.4;
+          const first = actions[0]?.trim().toLowerCase() ?? "";
+          const repeat = Boolean(first) && first === lastCallRef.current?.trim().toLowerCase();
+          if (repeat) repeatsRef.current += 1;
+          const worthIt =
+            actions.length > 0 &&
+            !repeat &&
+            (json.speak?.interrupt || (importance >= SPEAK_FLOOR && confident));
+          if (worthIt) {
+            // The previous call was superseded without being repeated → treat as done.
+            if (lastCallRef.current && !json.think?.stuck) {
+              const done = lastCallRef.current;
+              setWorked((prev) => [...prev.filter((w) => w !== done), done].slice(-8));
+            }
+            lastCallRef.current = actions[0] ?? null;
+            repeatsRef.current = 0;
+            setCall({ actions, urgency: json.speak?.urgency ?? "calm" });
+          }
+          if (json.think?.stuck && lastCallRef.current) {
+            const stuckOn = lastCallRef.current;
+            setFailed((prev) => [...prev.filter((f) => f !== stuckOn), stuckOn].slice(-8));
+            if (json.think.strategy_shift?.trim()) {
+              lastCallRef.current = json.think.strategy_shift.trim();
+              setCall({ actions: [json.think.strategy_shift.trim()], urgency: "act" });
+            }
+          }
+          if (json.think?.state) {
+            setState((prev) => {
+              const next = { ...prev };
+              for (const [k, v] of Object.entries(json.think.state)) {
+                if (typeof v === "string" && v.trim()) next[k as keyof PlayerState] = v.trim();
+              }
+              return next;
+            });
+          }
+          if (json.video?.url?.trim()) {
+            setVideoClip({ url: clipUrl(json.video), label: json.video.label || "walkthrough" });
+          }
         }
         if (json.game?.trim() && json.game.trim() !== dossierGame) void loadDossier(json.game);
         if (json.memory_updates?.length) {
@@ -400,15 +461,15 @@ function Oracle() {
     [grabFrame, dossierGame, loadDossier],
   );
 
-  // Self-scheduling loop: the gap follows how fast the game is actually moving, and a
-  // read is fired without waiting for the previous one to land.
+  // Self-scheduling loop: the gap is whatever the coach asked for last read, so quiet
+  // areas cost almost nothing and hot moments run flat out. Paused while a clip is open.
   useEffect(() => {
-    if (!watching) return;
+    if (!watching || videoClip) return;
     let cancelled = false;
     const run = () => {
       void consult();
       if (cancelled) return;
-      const gap = tick === 0 ? PACE_TICK[paceRef.current] : tick;
+      const gap = tick === 0 ? scanRef.current : tick;
       timer.current = setTimeout(run, gap);
     };
     timer.current = setTimeout(run, 300);
@@ -416,7 +477,8 @@ function Oracle() {
       cancelled = true;
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [watching, tick, consult]);
+  }, [watching, tick, consult, videoClip]);
+
 
 
 
