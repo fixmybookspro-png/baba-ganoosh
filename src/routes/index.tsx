@@ -211,6 +211,16 @@ function Oracle() {
   const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
   const [dossierGame, setDossierGame] = useState<string | null>(null);
   const [dossierLoading, setDossierLoading] = useState(false);
+  // The last thing ORACLE actually said out loud — kept on screen while it stays quiet.
+  const [call, setCall] = useState<{ actions: string[]; urgency: CoachUpdate["speak"]["urgency"] } | null>(null);
+  const [state, setState] = useState<PlayerState>(EMPTY_STATE);
+  const [failed, setFailed] = useState<string[]>([]);
+  const [worked, setWorked] = useState<string[]>([]);
+  const [sessionSummary, setSessionSummary] = useState<string | null>(null);
+  const [dev, setDev] = useState(false);
+  const [videoClip, setVideoClip] = useState<{ url: string; label: string } | null>(null);
+  const [scanMs, setScanMs] = useState(1100);
+  const [callsPerMin, setCallsPerMin] = useState(0);
 
   // Live refs so the capture loop always reads current values without restarting.
   const memoryRef = useRef<string[]>([]);
@@ -221,20 +231,36 @@ function Oracle() {
   const paceRef = useRef<CoachUpdate["pace"]>("fast");
   const profileRef = useRef<Profile>(EMPTY_PROFILE);
   const dossierRef = useRef<string | null>(null);
+  const stateRef = useRef<PlayerState>(EMPTY_STATE);
+  const failedRef = useRef<string[]>([]);
+  const workedRef = useRef<string[]>([]);
+  const summaryRef = useRef<string | null>(null);
+  const lastCallRef = useRef<string | null>(null);
+  const repeatsRef = useRef(0);
+  const scanRef = useRef(1100);
+  const callTimesRef = useRef<number[]>([]);
   memoryRef.current = memory;
   feedRef.current = feed;
   objectiveRef.current = objective;
   hintRef.current = gameHint;
   skillRef.current = skill;
   profileRef.current = profile;
+  stateRef.current = state;
+  failedRef.current = failed;
+  workedRef.current = worked;
+  summaryRef.current = sessionSummary;
 
-  // Profile + memory survive reloads so a mid-game companion keeps everything it learned.
+  // Profile + memory + structured state + last session survive reloads.
   useEffect(() => {
     try {
       const p = localStorage.getItem(PROFILE_KEY);
       if (p) setProfile({ ...EMPTY_PROFILE, ...(JSON.parse(p) as Partial<Profile>) });
       const m = localStorage.getItem(MEMORY_KEY);
       if (m) setMemory(JSON.parse(m) as string[]);
+      const st = localStorage.getItem(STATE_KEY);
+      if (st) setState({ ...EMPTY_STATE, ...(JSON.parse(st) as Partial<PlayerState>) });
+      const ss = localStorage.getItem(SESSION_KEY);
+      if (ss) setSessionSummary(ss);
     } catch {
       /* first run */
     }
@@ -256,6 +282,15 @@ function Oracle() {
       /* storage unavailable */
     }
   }, [memory]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STATE_KEY, JSON.stringify(state));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [state]);
+
 
   const grabFrame = useCallback((): string | null => {
     const video = videoRef.current;
