@@ -30,16 +30,50 @@ import { cn } from "@/lib/utils";
 
 type CoachUpdate = {
   game: string;
-  situation: string;
-  next_actions: string[];
+  see: { situation: string; observations: string[]; confidence: number; change: string };
+  think: {
+    state: PlayerState;
+    prediction: string;
+    stuck: boolean;
+    strategy_shift: string;
+  };
+  speak: {
+    actions: string[];
+    importance: number;
+    urgency: "calm" | "act" | "urgent";
+    interrupt: boolean;
+  };
   prep: string[];
   secrets: string[];
   memory_updates: string[];
   reply: string | null;
-  urgency: "calm" | "act" | "urgent";
   skill_read: string;
   pace: "twitch" | "fast" | "steady";
+  scan_ms: number;
+  video: { url: string | null; start_seconds: number; label: string };
 };
+
+// Compact structured memory — sent instead of dragging whole chat history around.
+type PlayerState = {
+  mission: string;
+  stage: string;
+  progress: string;
+  build: string;
+  choices: string;
+  problems: string;
+  next_expected: string;
+};
+
+const EMPTY_STATE: PlayerState = {
+  mission: "",
+  stage: "",
+  progress: "",
+  build: "",
+  choices: "",
+  problems: "",
+  next_expected: "",
+};
+
 
 type FeedItem = {
   id: string;
