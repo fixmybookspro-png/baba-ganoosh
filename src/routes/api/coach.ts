@@ -1,5 +1,25 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+/**
+ * SEE / THINK / SPEAK coach.
+ *
+ * see   → raw observations from the frame + a confidence score
+ * think → game state, prediction of what's next, stuck detection
+ * speak → whether anything is worth interrupting the player for, and the 3-8 word call
+ *
+ * The model also decides the next scan gap (scan_ms) from the state it just read, so
+ * safe/menu/travel moments cost almost nothing and combat/puzzles/decisions go fast.
+ */
+type PlayerState = {
+  mission?: string;
+  stage?: string;
+  progress?: string;
+  build?: string;
+  choices?: string;
+  problems?: string;
+  next_expected?: string;
+};
+
 type CoachRequest = {
   frame?: string | null;
   memory?: string[];
@@ -9,6 +29,13 @@ type CoachRequest = {
   gameHint?: string;
   skill?: string;
   dossier?: string | null;
+  state?: PlayerState | null;
+  lastInstruction?: string | null;
+  repeats?: number;
+  failed?: string[];
+  worked?: string[];
+  sessionSummary?: string | null;
+  wantsVideo?: boolean;
   profile?: {
     platform?: string;
     progress?: string;
@@ -19,56 +46,106 @@ type CoachRequest = {
   } | null;
 };
 
+const str = { type: "string" } as const;
+const strList = { type: "array", items: { type: "string" } } as const;
+
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: [
-    "game",
-    "situation",
-    "next_actions",
-    "prep",
-    "secrets",
-    "memory_updates",
-    "reply",
-    "urgency",
-    "skill_read",
-    "pace",
-  ],
+  required: ["game", "see", "think", "speak", "prep", "secrets", "memory_updates", "reply", "skill_read", "pace", "scan_ms", "video"],
   properties: {
-    game: { type: "string" },
-    situation: { type: "string" },
-    next_actions: { type: "array", items: { type: "string" } },
-    prep: { type: "array", items: { type: "string" } },
-    secrets: { type: "array", items: { type: "string" } },
-    memory_updates: { type: "array", items: { type: "string" } },
+    game: str,
+    see: {
+      type: "object",
+      additionalProperties: false,
+      required: ["situation", "observations", "confidence", "change"],
+      properties: {
+        situation: str,
+        observations: strList,
+        confidence: { type: "number" },
+        change: str,
+      },
+    },
+    think: {
+      type: "object",
+      additionalProperties: false,
+      required: ["state", "prediction", "stuck", "strategy_shift"],
+      properties: {
+        state: {
+          type: "object",
+          additionalProperties: false,
+          required: ["mission", "stage", "progress", "build", "choices", "problems", "next_expected"],
+          properties: {
+            mission: str,
+            stage: str,
+            progress: str,
+            build: str,
+            choices: str,
+            problems: str,
+            next_expected: str,
+          },
+        },
+        prediction: str,
+        stuck: { type: "boolean" },
+        strategy_shift: str,
+      },
+    },
+    speak: {
+      type: "object",
+      additionalProperties: false,
+      required: ["actions", "importance", "urgency", "interrupt"],
+      properties: {
+        actions: strList,
+        importance: { type: "number" },
+        urgency: { type: "string", enum: ["calm", "act", "urgent"] },
+        interrupt: { type: "boolean" },
+      },
+    },
+    prep: strList,
+    secrets: strList,
+    memory_updates: strList,
     reply: { type: ["string", "null"] },
-    urgency: { type: "string", enum: ["calm", "act", "urgent"] },
-    skill_read: { type: "string" },
+    skill_read: str,
     pace: { type: "string", enum: ["twitch", "fast", "steady"] },
+    scan_ms: { type: "number" },
+    video: {
+      type: "object",
+      additionalProperties: false,
+      required: ["url", "start_seconds", "label"],
+      properties: {
+        url: { type: ["string", "null"] },
+        start_seconds: { type: "number" },
+        label: str,
+      },
+    },
   },
 } as const;
 
-const SYSTEM = `You are ORACLE, the world's best gamer, coaching a player who is ACTIVELY PLAYING right now. They cannot read. They glance.
+const SYSTEM = `You are ORACLE, an expert friend watching someone play RIGHT NOW. They are holding a controller. They glance, they do not read.
 
-HARD BANS — never output these:
-- Narrating the screen ("you are in combat", "you're low on health", "you're exploring").
-- Anything obvious to anyone with eyes, or any tutorial/beginner step (open inventory, use cover, aim for the head, save your game, watch your health).
-- Generic filler ("stay alert", "be careful", "keep an eye on your surroundings", "manage resources").
-- Preamble, explanations, hedging, punctuation-heavy sentences.
+Work in three separate stages and fill each part of the JSON:
 
-INSTEAD: solve it. If they need health, say WHERE the health is. If they're wandering, say where to GO and what to DO there. Every line must contain a place, direction, target, item, button/combo, number or route the player did not already know.
+SEE — what is literally on the frame. observations = short factual notes. confidence 0-1 (low if the frame is blurry, a photo of a TV, a menu, dark, or you are unsure of the game). change = what changed vs the last read, or "same".
 
-FORMAT:
-- next_actions: 1-3 lines, each 3-8 WORDS MAX, imperative, most urgent first. e.g. "Vending machine, alley left, buy 2 maxdocs" / "Quickhack Reboot Optics on sniper, roof right".
-- prep: up to 4 ultra-short lines setting them up 1-5 steps AHEAD of the current frame — what's coming, where to be, what to hold, what to buy/save/spec for next. Same 3-8 word budget. This is the "think five steps ahead" channel; keep it out of next_actions.
-- The frame is 1-3 seconds stale and fast games (Cyberpunk 2077, Warzone, Elden Ring) move constantly. Call what will still be true in the NEXT few seconds. Bias to advice tied to the map, build, objective and enemy layout rather than exact pixel positions.
-- situation: max 8 words, state only, no advice.
-- skill_read: short read of their level; if locked, echo it. Higher skill = terser, advanced lines (DPS windows, i-frames, routing, build synergy). Never say anything below their level.
-- pace: "twitch" (combat/chase/timer), "fast" (threats near), "steady" (menu/safe/cutscene/loading).
-- secrets: only tricks that apply to THIS area/state right now — glitches, skips, exploits, hidden loot, Easter eggs, frame-perfect tech, dev secrets. Use the GAME DOSSIER below when given. Empty array if nothing fits. Nothing widely known at their level.
-- memory_updates: only NEW/CHANGED durable facts (build, loadout, quest step, boss phase, resources, currency, level, preferences). Never repeat memory.
-- reply: only when they asked or steered; else null.
-- Menus/loading/non-game: say so in situation in <=8 words and coach the menu (what to buy, spec, equip next).`;
+THINK — interpret with game knowledge + the player's history and memory. Keep state fields short (a few words each). prediction = the most likely next threat/objective/puzzle/loot/decision. stuck = true only if the player has clearly failed the same thing repeatedly. strategy_shift = a DIFFERENT approach when stuck (never the same advice reworded).
+
+SPEAK — decide if it is worth saying anything at all.
+- importance 0-100. Silence is the default: if nothing changed, nothing is missable, and no danger or decision is imminent, return actions: [] with importance under 30 and interrupt false.
+- interrupt true ONLY for immediate danger, a missable item/event, a major choice, or a hard timing window.
+- If confidence < 0.4, stay quiet (empty actions) unless there is obvious danger.
+- actions: 1-3 lines, 3-8 WORDS MAX each, imperative, concrete. Urgent = ultra short: "Heal now." "Cover left." "Wait." "Ladder behind you."
+- NEVER repeat the LAST INSTRUCTION if it is still pending or already worked. If it failed, replace it with strategy_shift-style, more specific help (exact button, timing, position, alternate route).
+
+HARD BANS: narrating the screen, anything obvious to anyone with eyes, tutorial/beginner steps, generic filler ("stay alert", "manage resources"), preamble, hedging.
+
+prep: up to 4 lines, 3-8 words, setting them up for what is coming (from prediction).
+secrets: only tricks that apply to THIS spot right now (glitches, skips, hidden loot, Easter eggs). Empty if none.
+memory_updates: only NEW durable facts. Never repeat existing memory.
+reply: only when they asked or steered; else null.
+skill_read: short read of their level; echo it if locked. Never say anything below their level.
+pace: "twitch" (combat/chase/timer), "fast" (threats near), "steady" (menu/safe/cutscene/travel).
+scan_ms: how many ms until you should look again. 400-800 in combat, boss fights, puzzles with timing or missable events; 1500-3000 when exploring safe areas; 4000-10000 in menus, cutscenes, loading, fast travel, shops, safe hubs. Be efficient — do not ask for fast scans without reason.
+video: only when the player asked to be SHOWN something and you know a real walkthrough video for this exact step — a real, existing YouTube URL and a start timestamp in seconds. Otherwise url null, start_seconds 0, label "". Never invent a URL.`;
 
 export const Route = createFileRoute("/api/coach")({
   server: {
@@ -92,7 +169,7 @@ export const Route = createFileRoute("/api/coach")({
           });
         }
 
-        const memory = (body.memory ?? []).slice(-40);
+        const memory = (body.memory ?? []).slice(-30);
         const history = (body.history ?? []).slice(-6);
 
         const p = body.profile ?? {};
@@ -105,26 +182,43 @@ export const Route = createFileRoute("/api/coach")({
           p.avoid?.trim() ? `NEVER mention: ${p.avoid.trim()}` : "",
         ].filter(Boolean);
 
+        const s = body.state ?? {};
+        const stateLines = Object.entries(s)
+          .filter(([, v]) => typeof v === "string" && v.trim())
+          .map(([k, v]) => `${k}: ${(v as string).trim()}`);
+
         const context = [
           `PLAYER OBJECTIVE: ${body.objective?.trim() || "Win the game as efficiently as possible."}`,
           profileLines.length
             ? `PLAYER CARD (they started mid-game; treat as ground truth, never re-ask it):\n- ${profileLines.join("\n- ")}`
             : "",
+          stateLines.length ? `TRACKED GAME STATE:\n- ${stateLines.join("\n- ")}` : "",
+          body.sessionSummary?.trim()
+            ? `LAST SESSION SUMMARY:\n${body.sessionSummary.trim().slice(0, 1500)}`
+            : "",
+          body.lastInstruction?.trim()
+            ? `LAST INSTRUCTION YOU GAVE: "${body.lastInstruction.trim()}" (repeated ${body.repeats ?? 0}x). Do not say it again in any wording.`
+            : "",
+          body.failed?.length ? `FAILED ATTEMPTS (change tactics):\n- ${body.failed.slice(-6).join("\n- ")}` : "",
+          body.worked?.length ? `WHAT WORKED:\n- ${body.worked.slice(-6).join("\n- ")}` : "",
           body.gameHint?.trim() ? `GAME HINT FROM PLAYER: ${body.gameHint.trim()}` : "",
           body.skill && body.skill !== "auto"
             ? `PLAYER SKILL LEVEL (locked by them): ${body.skill}. Never say anything below this level.`
-            : "PLAYER SKILL LEVEL: unknown — infer it from their play and memory, and calibrate every call to it.",
+            : "PLAYER SKILL LEVEL: unknown — infer it and calibrate every call to it.",
           body.dossier?.trim()
-            ? `GAME DOSSIER (deep knowledge of this game — routes, exploits, tricks, best builds; use it, don't repeat it verbatim):\n${body.dossier.trim().slice(0, 8000)}`
+            ? `GAME KNOWLEDGE (routes, exploits, tricks, boss windows, missable events — use it, don't repeat it verbatim):\n${body.dossier.trim().slice(0, 8000)}`
             : "",
           memory.length ? `SESSION MEMORY:\n- ${memory.join("\n- ")}` : "SESSION MEMORY: (empty)",
           history.length
             ? `RECENT DIALOGUE:\n${history.map((h) => `${h.role === "user" ? "PLAYER" : "ORACLE"}: ${h.text}`).join("\n")}`
             : "",
           body.message?.trim() ? `PLAYER JUST SAID: "${body.message.trim()}"` : "",
+          body.wantsVideo
+            ? "THEY ASKED TO BE SHOWN: return a real walkthrough video URL + timestamp for this exact step if one exists."
+            : "",
           body.frame
-            ? "Current frame of their screen follows. It is ~2s stale — coach the next few seconds."
-            : "No frame available; answer from memory only.",
+            ? "Current frame of their screen follows. It is ~1-2s stale — call what will be true in the next few seconds."
+            : "No frame available; answer from state and memory only.",
         ]
           .filter(Boolean)
           .join("\n\n");

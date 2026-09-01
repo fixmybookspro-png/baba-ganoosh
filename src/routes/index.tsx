@@ -30,16 +30,50 @@ import { cn } from "@/lib/utils";
 
 type CoachUpdate = {
   game: string;
-  situation: string;
-  next_actions: string[];
+  see: { situation: string; observations: string[]; confidence: number; change: string };
+  think: {
+    state: PlayerState;
+    prediction: string;
+    stuck: boolean;
+    strategy_shift: string;
+  };
+  speak: {
+    actions: string[];
+    importance: number;
+    urgency: "calm" | "act" | "urgent";
+    interrupt: boolean;
+  };
   prep: string[];
   secrets: string[];
   memory_updates: string[];
   reply: string | null;
-  urgency: "calm" | "act" | "urgent";
   skill_read: string;
   pace: "twitch" | "fast" | "steady";
+  scan_ms: number;
+  video: { url: string | null; start_seconds: number; label: string };
 };
+
+// Compact structured memory — sent instead of dragging whole chat history around.
+type PlayerState = {
+  mission: string;
+  stage: string;
+  progress: string;
+  build: string;
+  choices: string;
+  problems: string;
+  next_expected: string;
+};
+
+const EMPTY_STATE: PlayerState = {
+  mission: "",
+  stage: "",
+  progress: "",
+  build: "",
+  choices: "",
+  problems: "",
+  next_expected: "",
+};
+
 
 type FeedItem = {
   id: string;
@@ -82,6 +116,8 @@ const PROFILE_FIELDS: { key: keyof Profile; label: string; placeholder: string }
 
 const PROFILE_KEY = "oracle:profile";
 const MEMORY_KEY = "oracle:memory";
+const STATE_KEY = "oracle:state";
+const SESSION_KEY = "oracle:session";
 
 const TICKS = [
   { label: "auto", value: 0 },
@@ -101,11 +137,17 @@ const SKILLS = [
 
 type SkillId = (typeof SKILLS)[number]["id"];
 
-const urgencyStyles: Record<CoachUpdate["urgency"], string> = {
+// Below this, an alert isn't worth the player's attention — ORACLE stays silent.
+const SPEAK_FLOOR = 30;
+const MIN_SCAN = 400;
+const MAX_SCAN = 10000;
+
+const urgencyStyles: Record<CoachUpdate["speak"]["urgency"], string> = {
   calm: "bg-secondary text-secondary-foreground",
   act: "bg-warn text-accent-foreground",
   urgent: "bg-danger text-destructive-foreground",
 };
+
 
 // Adaptive cadence: twitch frames are read ~2x/second, calm ones back off so nothing
 // is wasted on menus or downtime.
@@ -169,6 +211,16 @@ function Oracle() {
   const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
   const [dossierGame, setDossierGame] = useState<string | null>(null);
   const [dossierLoading, setDossierLoading] = useState(false);
+  // The last thing ORACLE actually said out loud — kept on screen while it stays quiet.
+  const [call, setCall] = useState<{ actions: string[]; urgency: CoachUpdate["speak"]["urgency"] } | null>(null);
+  const [state, setState] = useState<PlayerState>(EMPTY_STATE);
+  const [failed, setFailed] = useState<string[]>([]);
+  const [worked, setWorked] = useState<string[]>([]);
+  const [sessionSummary, setSessionSummary] = useState<string | null>(null);
+  const [dev, setDev] = useState(false);
+  const [videoClip, setVideoClip] = useState<{ url: string; label: string } | null>(null);
+  const [scanMs, setScanMs] = useState(1100);
+  const [callsPerMin, setCallsPerMin] = useState(0);
 
   // Live refs so the capture loop always reads current values without restarting.
   const memoryRef = useRef<string[]>([]);
@@ -179,20 +231,36 @@ function Oracle() {
   const paceRef = useRef<CoachUpdate["pace"]>("fast");
   const profileRef = useRef<Profile>(EMPTY_PROFILE);
   const dossierRef = useRef<string | null>(null);
+  const stateRef = useRef<PlayerState>(EMPTY_STATE);
+  const failedRef = useRef<string[]>([]);
+  const workedRef = useRef<string[]>([]);
+  const summaryRef = useRef<string | null>(null);
+  const lastCallRef = useRef<string | null>(null);
+  const repeatsRef = useRef(0);
+  const scanRef = useRef(1100);
+  const callTimesRef = useRef<number[]>([]);
   memoryRef.current = memory;
   feedRef.current = feed;
   objectiveRef.current = objective;
   hintRef.current = gameHint;
   skillRef.current = skill;
   profileRef.current = profile;
+  stateRef.current = state;
+  failedRef.current = failed;
+  workedRef.current = worked;
+  summaryRef.current = sessionSummary;
 
-  // Profile + memory survive reloads so a mid-game companion keeps everything it learned.
+  // Profile + memory + structured state + last session survive reloads.
   useEffect(() => {
     try {
       const p = localStorage.getItem(PROFILE_KEY);
       if (p) setProfile({ ...EMPTY_PROFILE, ...(JSON.parse(p) as Partial<Profile>) });
       const m = localStorage.getItem(MEMORY_KEY);
       if (m) setMemory(JSON.parse(m) as string[]);
+      const st = localStorage.getItem(STATE_KEY);
+      if (st) setState({ ...EMPTY_STATE, ...(JSON.parse(st) as Partial<PlayerState>) });
+      const ss = localStorage.getItem(SESSION_KEY);
+      if (ss) setSessionSummary(ss);
     } catch {
       /* first run */
     }
@@ -214,6 +282,15 @@ function Oracle() {
       /* storage unavailable */
     }
   }, [memory]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STATE_KEY, JSON.stringify(state));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [state]);
+
 
   const grabFrame = useCallback((): string | null => {
     const video = videoRef.current;
@@ -263,6 +340,9 @@ function Oracle() {
       inFlight.current += 1;
       setThinking(true);
       const started = performance.now();
+      const now = Date.now();
+      callTimesRef.current = [...callTimesRef.current, now].filter((t) => now - t < 60_000);
+      setCallsPerMin(callTimesRef.current.length);
       try {
         const res = await fetch("/api/coach", {
           method: "POST",
@@ -275,8 +355,15 @@ function Oracle() {
             skill: skillRef.current,
             profile: profileRef.current,
             dossier: dossierRef.current,
+            state: stateRef.current,
+            lastInstruction: lastCallRef.current,
+            repeats: repeatsRef.current,
+            failed: failedRef.current,
+            worked: workedRef.current,
+            sessionSummary: summaryRef.current,
+            wantsVideo: message ? /show me|show it|video|watch it/i.test(message) : false,
             message: message ?? null,
-            history: feedRef.current.slice(-8).map((f) => ({ role: f.role, text: f.text })),
+            history: feedRef.current.slice(-6).map((f) => ({ role: f.role, text: f.text })),
           }),
         });
         const json = (await res.json()) as CoachUpdate & { error?: string };
@@ -288,9 +375,60 @@ function Oracle() {
         applied.current = Math.max(applied.current, id);
         setError(null);
         if (json.pace) paceRef.current = json.pace;
+
+        // Adaptive scanning: the model sets the next gap from the state it just read.
+        const nextScan = Math.min(
+          MAX_SCAN,
+          Math.max(MIN_SCAN, Math.round(json.scan_ms || PACE_TICK[paceRef.current])),
+        );
+        scanRef.current = nextScan;
+        if (!stale) setScanMs(nextScan);
+
         if (!stale) {
           setLatency(Math.round(performance.now() - started));
           setUpdate(json);
+
+          // SPEAK gate: quiet unless it matters, and never the same line twice.
+          const actions = (json.speak?.actions ?? []).filter((a) => a.trim());
+          const importance = json.speak?.importance ?? 0;
+          const confident = (json.see?.confidence ?? 1) >= 0.4;
+          const first = actions[0]?.trim().toLowerCase() ?? "";
+          const repeat = Boolean(first) && first === lastCallRef.current?.trim().toLowerCase();
+          if (repeat) repeatsRef.current += 1;
+          const worthIt =
+            actions.length > 0 &&
+            !repeat &&
+            (json.speak?.interrupt || (importance >= SPEAK_FLOOR && confident));
+          if (worthIt) {
+            // The previous call was superseded without being repeated → treat as done.
+            if (lastCallRef.current && !json.think?.stuck) {
+              const done = lastCallRef.current;
+              setWorked((prev) => [...prev.filter((w) => w !== done), done].slice(-8));
+            }
+            lastCallRef.current = actions[0] ?? null;
+            repeatsRef.current = 0;
+            setCall({ actions, urgency: json.speak?.urgency ?? "calm" });
+          }
+          if (json.think?.stuck && lastCallRef.current) {
+            const stuckOn = lastCallRef.current;
+            setFailed((prev) => [...prev.filter((f) => f !== stuckOn), stuckOn].slice(-8));
+            if (json.think.strategy_shift?.trim()) {
+              lastCallRef.current = json.think.strategy_shift.trim();
+              setCall({ actions: [json.think.strategy_shift.trim()], urgency: "act" });
+            }
+          }
+          if (json.think?.state) {
+            setState((prev) => {
+              const next = { ...prev };
+              for (const [k, v] of Object.entries(json.think.state)) {
+                if (typeof v === "string" && v.trim()) next[k as keyof PlayerState] = v.trim();
+              }
+              return next;
+            });
+          }
+          if (json.video?.url?.trim()) {
+            setVideoClip({ url: clipUrl(json.video), label: json.video.label || "walkthrough" });
+          }
         }
         if (json.game?.trim() && json.game.trim() !== dossierGame) void loadDossier(json.game);
         if (json.memory_updates?.length) {
@@ -323,15 +461,15 @@ function Oracle() {
     [grabFrame, dossierGame, loadDossier],
   );
 
-  // Self-scheduling loop: the gap follows how fast the game is actually moving, and a
-  // read is fired without waiting for the previous one to land.
+  // Self-scheduling loop: the gap is whatever the coach asked for last read, so quiet
+  // areas cost almost nothing and hot moments run flat out. Paused while a clip is open.
   useEffect(() => {
-    if (!watching) return;
+    if (!watching || videoClip) return;
     let cancelled = false;
     const run = () => {
       void consult();
       if (cancelled) return;
-      const gap = tick === 0 ? PACE_TICK[paceRef.current] : tick;
+      const gap = tick === 0 ? scanRef.current : tick;
       timer.current = setTimeout(run, gap);
     };
     timer.current = setTimeout(run, 300);
@@ -339,7 +477,8 @@ function Oracle() {
       cancelled = true;
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [watching, tick, consult]);
+  }, [watching, tick, consult, videoClip]);
+
 
 
 
