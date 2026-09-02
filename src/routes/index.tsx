@@ -184,6 +184,18 @@ export const Route = createFileRoute("/")({
   component: Oracle,
 });
 
+// Turn a walkthrough link + timestamp into an embeddable, auto-seeked player URL.
+function clipUrl(video: { url: string | null; start_seconds: number }) {
+  const raw = video.url ?? "";
+  const start = Math.max(0, Math.round(video.start_seconds || 0));
+  const id =
+    raw.match(/[?&]v=([\w-]{6,})/)?.[1] ??
+    raw.match(/youtu\.be\/([\w-]{6,})/)?.[1] ??
+    raw.match(/embed\/([\w-]{6,})/)?.[1] ??
+    null;
+  return id ? `https://www.youtube.com/embed/${id}?start=${start}&autoplay=1` : raw;
+}
+
 function Oracle() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -560,20 +572,19 @@ function Oracle() {
     void consult(text);
   };
 
-  const actions = update?.next_actions?.length ? update.next_actions : ["Waiting for your screen…"];
+  const urgency = call?.urgency ?? "calm";
+  const actions = call?.actions?.length ? call.actions : ["Waiting for your screen…"];
 
   const callCard = (
-    <div className={cn("hud-panel p-4", update?.urgency === "urgent" && "glow-signal")}>
+    <div className={cn("hud-panel p-4", urgency === "urgent" && "glow-signal")}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Crosshair className="size-4 text-signal" />
           <span className="hud-label">do this now</span>
         </div>
         <div className="flex items-center gap-1.5">
-          {update && (
-            <Badge className={cn("text-[0.65rem]", urgencyStyles[update.urgency])}>
-              {update.urgency}
-            </Badge>
+          {call && (
+            <Badge className={cn("text-[0.65rem]", urgencyStyles[urgency])}>{urgency}</Badge>
           )}
           {thinking && <span className="live-dot size-2 rounded-full bg-signal" />}
         </div>
@@ -611,9 +622,9 @@ function Oracle() {
           </ul>
         </div>
       ) : null}
-      {update?.situation && (
+      {update?.see?.situation && (
         <p className="mt-3 border-t border-border pt-3 text-sm text-muted-foreground">
-          {update.situation}
+          {update.see.situation}
         </p>
       )}
     </div>
@@ -1035,6 +1046,69 @@ function Oracle() {
               </TabsContent>
             </Tabs>
         </section>
+      </div>
+
+      {/* "Show me" clip — scanning pauses while it plays so nothing fights for attention. */}
+      {videoClip && (
+        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card p-3">
+          <div className="mx-auto flex max-w-3xl items-center justify-between gap-2">
+            <span className="hud-label">{videoClip.label}</span>
+            <Button variant="secondary" size="sm" onClick={() => setVideoClip(null)}>
+              Close
+            </Button>
+          </div>
+          <div className="mx-auto mt-2 aspect-video w-full max-w-3xl overflow-hidden rounded-md bg-black">
+            <iframe
+              src={videoClip.url}
+              title={videoClip.label}
+              allow="accelerometer; autoplay; encrypted-media; picture-in-picture"
+              allowFullScreen
+              className="size-full"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Dev panel — vision output, latency, API usage. Off by default. */}
+      <div className={cn("mt-6", focus && "hidden")}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs text-muted-foreground"
+          onClick={() => setDev((d) => !d)}
+        >
+          {dev ? "Hide" : "Show"} debug
+        </Button>
+        {dev && (
+          <div className="hud-panel mt-2 space-y-2 p-4 font-mono text-xs text-muted-foreground">
+            <div className="flex flex-wrap gap-x-6 gap-y-1">
+              <span>latency: {latency ? `${latency}ms` : "—"}</span>
+              <span>scan: {scanMs}ms</span>
+              <span>calls/min: {callsPerMin}</span>
+              <span>confidence: {update?.see?.confidence ?? "—"}</span>
+              <span>importance: {update?.speak?.importance ?? "—"}</span>
+              <span>pace: {update?.pace ?? "—"}</span>
+            </div>
+            {update?.see?.observations?.length ? (
+              <div>
+                <span className="hud-label">saw</span>
+                <ul className="mt-1 space-y-0.5">
+                  {update.see.observations.map((o, i) => (
+                    <li key={`${i}-${o}`}>› {o}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {update?.think?.prediction ? <p>next: {update.think.prediction}</p> : null}
+            {update?.think?.stuck ? <p>stuck → {update.think.strategy_shift}</p> : null}
+            {sessionSummary ? <p>summary: {sessionSummary}</p> : null}
+            <div className="flex flex-wrap gap-x-6 gap-y-1">
+              <span>failed: {failed.length}</span>
+              <span>worked: {worked.length}</span>
+              <span>state: {state.stage || "—"}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <canvas ref={canvasRef} className="hidden" />
