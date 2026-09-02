@@ -251,6 +251,10 @@ function Oracle() {
   const repeatsRef = useRef(0);
   const scanRef = useRef(1100);
   const callTimesRef = useRef<number[]>([]);
+  // Local-only frame prefilter: coarse grayscale fingerprint of the last sent frame.
+  const sigRef = useRef<Uint8Array | null>(null);
+  const lastSentAtRef = useRef(0);
+  const [skippedFrames, setSkippedFrames] = useState(0);
   memoryRef.current = memory;
   feedRef.current = feed;
   objectiveRef.current = objective;
