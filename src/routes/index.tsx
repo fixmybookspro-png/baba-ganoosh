@@ -547,12 +547,40 @@ function Oracle() {
     if (watching && source === "camera") void start("camera", next);
   };
 
+  // Compact session summary, built locally from state already tracked — no extra AI call.
+  const buildSummary = () => {
+    const s = stateRef.current;
+    const lines = [
+      s.mission ? `Mission: ${s.mission}` : "",
+      s.stage ? `Stage: ${s.stage}` : "",
+      s.progress ? `Progress: ${s.progress}` : "",
+      s.build ? `Build: ${s.build}` : "",
+      s.choices ? `Choices: ${s.choices}` : "",
+      s.problems ? `Open problems: ${s.problems}` : "",
+      s.next_expected ? `Next expected: ${s.next_expected}` : "",
+      workedRef.current.length ? `Worked: ${workedRef.current.slice(-5).join("; ")}` : "",
+      failedRef.current.length ? `Failed: ${failedRef.current.slice(-5).join("; ")}` : "",
+      memoryRef.current.length ? `Key facts: ${memoryRef.current.slice(-8).join("; ")}` : "",
+    ].filter(Boolean);
+    return lines.join("\n").slice(0, 2000);
+  };
+
   const stop = () => {
     setWatching(false);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
+    const summary = buildSummary();
+    if (summary) {
+      setSessionSummary(summary);
+      try {
+        localStorage.setItem(SESSION_KEY, summary);
+      } catch {
+        /* storage unavailable */
+      }
+    }
   };
+
 
   useEffect(() => () => streamRef.current?.getTracks().forEach((t) => t.stop()), []);
 
