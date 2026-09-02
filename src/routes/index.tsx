@@ -1127,17 +1127,26 @@ function Oracle() {
                 </ul>
               </div>
             ) : null}
+            {update?.see?.change ? <p>change: {update.see.change}</p> : null}
             {update?.think?.prediction ? <p>next: {update.think.prediction}</p> : null}
-            {update?.think?.stuck ? <p>stuck → {update.think.strategy_shift}</p> : null}
-            {sessionSummary ? <p>summary: {sessionSummary}</p> : null}
-            <div className="flex flex-wrap gap-x-6 gap-y-1">
-              <span>failed: {failed.length}</span>
-              <span>worked: {worked.length}</span>
-              <span>state: {state.stage || "—"}</span>
+            <p>stuck: {update?.think?.stuck ? `yes → ${update.think.strategy_shift}` : "no"}</p>
+            <div>
+              <span className="hud-label">tracked state</span>
+              <ul className="mt-1 space-y-0.5">
+                {Object.entries(state).map(([k, v]) => (
+                  <li key={k}>
+                    {k}: {v || "—"}
+                  </li>
+                ))}
+              </ul>
             </div>
-          </div>
-        )}
-      </div>
+            <p>last instruction: {lastCallRef.current ?? "—"} (x{repeatsRef.current})</p>
+            <p>failed ({failed.length}): {failed.slice(-4).join(" | ") || "—"}</p>
+            <p>worked ({worked.length}): {worked.slice(-4).join(" | ") || "—"}</p>
+            {sessionSummary ? (
+              <p className="whitespace-pre-wrap">summary:{"\n"}{sessionSummary}</p>
+            ) : null}
+
 
       <canvas ref={canvasRef} className="hidden" />
 
