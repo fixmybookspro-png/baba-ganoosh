@@ -560,20 +560,19 @@ function Oracle() {
     void consult(text);
   };
 
-  const actions = update?.next_actions?.length ? update.next_actions : ["Waiting for your screen…"];
+  const urgency = call?.urgency ?? "calm";
+  const actions = call?.actions?.length ? call.actions : ["Waiting for your screen…"];
 
   const callCard = (
-    <div className={cn("hud-panel p-4", update?.urgency === "urgent" && "glow-signal")}>
+    <div className={cn("hud-panel p-4", urgency === "urgent" && "glow-signal")}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Crosshair className="size-4 text-signal" />
           <span className="hud-label">do this now</span>
         </div>
         <div className="flex items-center gap-1.5">
-          {update && (
-            <Badge className={cn("text-[0.65rem]", urgencyStyles[update.urgency])}>
-              {update.urgency}
-            </Badge>
+          {call && (
+            <Badge className={cn("text-[0.65rem]", urgencyStyles[urgency])}>{urgency}</Badge>
           )}
           {thinking && <span className="live-dot size-2 rounded-full bg-signal" />}
         </div>
@@ -611,9 +610,9 @@ function Oracle() {
           </ul>
         </div>
       ) : null}
-      {update?.situation && (
+      {update?.see?.situation && (
         <p className="mt-3 border-t border-border pt-3 text-sm text-muted-foreground">
-          {update.situation}
+          {update.see.situation}
         </p>
       )}
     </div>
