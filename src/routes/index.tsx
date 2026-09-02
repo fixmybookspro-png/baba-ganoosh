@@ -184,6 +184,18 @@ export const Route = createFileRoute("/")({
   component: Oracle,
 });
 
+// Turn a walkthrough link + timestamp into an embeddable, auto-seeked player URL.
+function clipUrl(video: { url: string | null; start_seconds: number }) {
+  const raw = video.url ?? "";
+  const start = Math.max(0, Math.round(video.start_seconds || 0));
+  const id =
+    raw.match(/[?&]v=([\w-]{6,})/)?.[1] ??
+    raw.match(/youtu\.be\/([\w-]{6,})/)?.[1] ??
+    raw.match(/embed\/([\w-]{6,})/)?.[1] ??
+    null;
+  return id ? `https://www.youtube.com/embed/${id}?start=${start}&autoplay=1` : raw;
+}
+
 function Oracle() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
