@@ -1146,6 +1146,11 @@ function Oracle() {
             {sessionSummary ? (
               <p className="whitespace-pre-wrap">summary:{"\n"}{sessionSummary}</p>
             ) : null}
+          </div>
+        )}
+      </div>
+
+
 
 
       <canvas ref={canvasRef} className="hidden" />
