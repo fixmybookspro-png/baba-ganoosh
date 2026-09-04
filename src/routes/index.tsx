@@ -310,21 +310,23 @@ function Oracle() {
   }, [state]);
 
 
-  const grabFrame = useCallback((): string | null => {
+  const grabFrame = useCallback((sharp = false): string | null => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || !video.videoWidth) return null;
     // Smaller frame = far less encode + upload time, which is what actually keeps
-    // pace with a game like Cyberpunk.
-    const width = 640;
+    // pace with a game like Cyberpunk. Until the title is identified we send a
+    // sharper frame once — logos, HUDs and menu text are unreadable at 640/0.45.
+    const width = sharp ? 1152 : 640;
     const height = Math.round((video.videoHeight / video.videoWidth) * width);
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(video, 0, 0, width, height);
-    return canvas.toDataURL("image/jpeg", 0.45);
+    return canvas.toDataURL("image/jpeg", sharp ? 0.72 : 0.45);
   }, []);
+
 
   // One deep knowledge brief per game — routes, exploits, secret loot — fetched once and
   // carried on every fast read so the live calls can be terse but genuinely informed.
