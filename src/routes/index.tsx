@@ -525,6 +525,8 @@ function Oracle() {
     face: "environment" | "user" = facing,
   ) => {
     setError(null);
+    gameRef.current = null; // fresh session: identify the title again
+    sigRef.current = null;
     try {
       const stream =
         mode === "camera"
