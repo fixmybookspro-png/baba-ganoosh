@@ -251,6 +251,8 @@ function Oracle() {
   const repeatsRef = useRef(0);
   const scanRef = useRef(1100);
   const callTimesRef = useRef<number[]>([]);
+  // Locked title once ORACLE (or the player) names the game, so later frames don't re-guess.
+  const gameRef = useRef<string | null>(null);
   // Local-only frame prefilter: coarse grayscale fingerprint of the last sent frame.
   const sigRef = useRef<Uint8Array | null>(null);
   const lastSentAtRef = useRef(0);
