@@ -27,6 +27,7 @@ type CoachRequest = {
   message?: string | null;
   history?: { role: "user" | "assistant"; text: string }[];
   gameHint?: string;
+  knownGame?: string | null;
   skill?: string;
   dossier?: string | null;
   state?: PlayerState | null;
@@ -125,6 +126,8 @@ const SYSTEM = `You are ORACLE, an expert friend watching someone play RIGHT NOW
 
 Work in three separate stages and fill each part of the JSON:
 
+GAME IDENTIFICATION comes first. game = the exact title (with edition/sequel number) you see. Identify it from HUD shape, minimap, fonts, UI colors, ability icons, weapon/ammo layout, subtitles, character models, art style — not just logos. If a KNOWN GAME is provided, keep using that exact title and never change or blank it unless the frame is unmistakably a different game. Only ever return "unknown" if the frame shows no game at all (desktop, browser, black screen); a blurry or dark gameplay frame still gets your single best-guess title, and lower see.confidence instead.
+
 SEE — what is literally on the frame. observations = short factual notes. confidence 0-1 (low if the frame is blurry, a photo of a TV, a menu, dark, or you are unsure of the game). change = what changed vs the last read, or "same".
 
 THINK — interpret with game knowledge + the player's history and memory. Keep state fields short (a few words each). prediction = the most likely next threat/objective/puzzle/loot/decision. stuck = true only if the player has clearly failed the same thing repeatedly. strategy_shift = a DIFFERENT approach when stuck (never the same advice reworded).
@@ -201,7 +204,10 @@ export const Route = createFileRoute("/api/coach")({
             : "",
           body.failed?.length ? `FAILED ATTEMPTS (change tactics):\n- ${body.failed.slice(-6).join("\n- ")}` : "",
           body.worked?.length ? `WHAT WORKED:\n- ${body.worked.slice(-6).join("\n- ")}` : "",
-          body.gameHint?.trim() ? `GAME HINT FROM PLAYER: ${body.gameHint.trim()}` : "",
+          body.knownGame?.trim()
+            ? `KNOWN GAME (already identified this session — reuse this exact title): ${body.knownGame.trim()}`
+            : "GAME NOT IDENTIFIED YET — name your single best guess of the title in `game`.",
+          body.gameHint?.trim() ? `GAME HINT FROM PLAYER (authoritative title): ${body.gameHint.trim()}` : "",
           body.skill && body.skill !== "auto"
             ? `PLAYER SKILL LEVEL (locked by them): ${body.skill}. Never say anything below this level.`
             : "PLAYER SKILL LEVEL: unknown — infer it and calibrate every call to it.",

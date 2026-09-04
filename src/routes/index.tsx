@@ -251,6 +251,8 @@ function Oracle() {
   const repeatsRef = useRef(0);
   const scanRef = useRef(1100);
   const callTimesRef = useRef<number[]>([]);
+  // Locked title once ORACLE (or the player) names the game, so later frames don't re-guess.
+  const gameRef = useRef<string | null>(null);
   // Local-only frame prefilter: coarse grayscale fingerprint of the last sent frame.
   const sigRef = useRef<Uint8Array | null>(null);
   const lastSentAtRef = useRef(0);
@@ -308,21 +310,23 @@ function Oracle() {
   }, [state]);
 
 
-  const grabFrame = useCallback((): string | null => {
+  const grabFrame = useCallback((sharp = false): string | null => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || !video.videoWidth) return null;
     // Smaller frame = far less encode + upload time, which is what actually keeps
-    // pace with a game like Cyberpunk.
-    const width = 640;
+    // pace with a game like Cyberpunk. Until the title is identified we send a
+    // sharper frame once — logos, HUDs and menu text are unreadable at 640/0.45.
+    const width = sharp ? 1152 : 640;
     const height = Math.round((video.videoHeight / video.videoWidth) * width);
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(video, 0, 0, width, height);
-    return canvas.toDataURL("image/jpeg", 0.45);
+    return canvas.toDataURL("image/jpeg", sharp ? 0.72 : 0.45);
   }, []);
+
 
   // One deep knowledge brief per game — routes, exploits, secret loot — fetched once and
   // carried on every fast read so the live calls can be terse but genuinely informed.
@@ -360,11 +364,13 @@ function Oracle() {
       callTimesRef.current = [...callTimesRef.current, now].filter((t) => now - t < 60_000);
       setCallsPerMin(callTimesRef.current.length);
       try {
+        const known = gameRef.current ?? (hintRef.current.trim() || null);
         const res = await fetch("/api/coach", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            frame: grabFrame(),
+            frame: grabFrame(!known),
+            knownGame: known,
             memory: memoryRef.current,
             objective: objectiveRef.current,
             gameHint: hintRef.current,
@@ -446,7 +452,12 @@ function Oracle() {
             setVideoClip({ url: clipUrl(json.video), label: json.video.label || "walkthrough" });
           }
         }
-        if (json.game?.trim() && json.game.trim() !== dossierGame) void loadDossier(json.game);
+        const named = json.game?.trim();
+        if (named && !/^(unknown|unclear|n\/a|none)$/i.test(named)) {
+          // Lock the title so every later read is anchored instead of re-guessing.
+          if (!gameRef.current || (json.see?.confidence ?? 0) >= 0.6) gameRef.current = named;
+          if (named !== dossierGame) void loadDossier(named);
+        }
         if (json.memory_updates?.length) {
           setMemory((prev) => {
             const seen = new Set(prev.map((m) => m.toLowerCase()));
@@ -514,6 +525,8 @@ function Oracle() {
     face: "environment" | "user" = facing,
   ) => {
     setError(null);
+    gameRef.current = null; // fresh session: identify the title again
+    sigRef.current = null;
     try {
       const stream =
         mode === "camera"
