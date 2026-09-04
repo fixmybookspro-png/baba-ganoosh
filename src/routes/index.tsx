@@ -364,11 +364,13 @@ function Oracle() {
       callTimesRef.current = [...callTimesRef.current, now].filter((t) => now - t < 60_000);
       setCallsPerMin(callTimesRef.current.length);
       try {
+        const known = gameRef.current ?? (hintRef.current.trim() || null);
         const res = await fetch("/api/coach", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            frame: grabFrame(),
+            frame: grabFrame(!known),
+            knownGame: known,
             memory: memoryRef.current,
             objective: objectiveRef.current,
             gameHint: hintRef.current,
