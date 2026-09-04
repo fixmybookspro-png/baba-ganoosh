@@ -452,7 +452,12 @@ function Oracle() {
             setVideoClip({ url: clipUrl(json.video), label: json.video.label || "walkthrough" });
           }
         }
-        if (json.game?.trim() && json.game.trim() !== dossierGame) void loadDossier(json.game);
+        const named = json.game?.trim();
+        if (named && !/^(unknown|unclear|n\/a|none)$/i.test(named)) {
+          // Lock the title so every later read is anchored instead of re-guessing.
+          if (!gameRef.current || (json.see?.confidence ?? 0) >= 0.6) gameRef.current = named;
+          if (named !== dossierGame) void loadDossier(named);
+        }
         if (json.memory_updates?.length) {
           setMemory((prev) => {
             const seen = new Set(prev.map((m) => m.toLowerCase()));
